@@ -46,6 +46,19 @@ final class BudgetSettings
     public const WARNING_SENT_PREFIX = 'ai.budget_warning_sent.';
 
     /**
+     * Memoised result of the `settings` table probe.
+     *
+     * `null` = not yet probed. Once resolved, subsequent reads short-
+     * circuit the Schema call — the same pattern AiServiceProvider uses
+     * for its toggle store. Reset when the table is created mid-request.
+     *
+     * @since 1.0.0
+     *
+     * @var bool|null
+     */
+    protected ?bool $settingsTableExists = null;
+
+    /**
      * Build the settings helper.
      *
      * @since 1.0.0
@@ -171,11 +184,65 @@ final class BudgetSettings
     /**
      * Retrieve the persisted admin banner for the current month, if any.
      *
+     * Returns null when the persisted banner belongs to a previous
+     * calendar month — otherwise the banner from July would still render
+     * on August 1 before the nightly job runs. The stale row is left in
+     * place for the job to clear, but callers see the correct "no
+     * warning" state immediately.
+     *
+     * @since 1.0.0
+     *
+     * @param  string|null  $currentMonth  Override month label used for the
+     *                                     freshness check; defaults to
+     *                                     `now()->format('Y-m')`.
+     *
+     * @return array{ month: string, spent_usd: float, cap_usd: float, threshold_percentage: float }|null
+     */
+    public function currentBanner( ?string $currentMonth = null ): ?array
+    {
+        $stored = $this->readSetting( 'ai.budget_banner' );
+
+        if ( null === $stored ) {
+            return null;
+        }
+
+        $decoded = json_decode( $stored, true );
+
+        if ( ! is_array( $decoded ) || ! isset( $decoded['month'] ) ) {
+            return null;
+        }
+
+        $month = (string) $decoded['month'];
+
+        if ( null === $currentMonth ) {
+            $currentMonth = now()->format( 'Y-m' );
+        }
+
+        if ( $month !== $currentMonth ) {
+            return null;
+        }
+
+        return [
+            'month'                => $month,
+            'spent_usd'            => (float) ( $decoded['spent_usd'] ?? 0 ),
+            'cap_usd'              => (float) ( $decoded['cap_usd'] ?? 0 ),
+            'threshold_percentage' => (float) ( $decoded['threshold_percentage'] ?? 0 ),
+        ];
+    }
+
+    /**
+     * Raw stored banner, ignoring the month-freshness filter.
+     *
+     * Used by `CheckBudgetThresholdJob` to detect and clear a stale
+     * prior-month banner. Not intended for admin UIs — callers rendering a
+     * banner should use `currentBanner()` so a month rollover self-clears
+     * before the nightly job runs.
+     *
      * @since 1.0.0
      *
      * @return array{ month: string, spent_usd: float, cap_usd: float, threshold_percentage: float }|null
      */
-    public function currentBanner(): ?array
+    public function storedBanner(): ?array
     {
         $stored = $this->readSetting( 'ai.budget_banner' );
 
@@ -236,6 +303,18 @@ final class BudgetSettings
     }
 
     /**
+     * Reset the memoised probe. Test-only hook; not part of the public API.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function resetSettingsTableProbe(): void
+    {
+        $this->settingsTableExists = null;
+    }
+
+    /**
      * Read a raw setting value or null.
      *
      * @since 1.0.0
@@ -246,7 +325,7 @@ final class BudgetSettings
      */
     protected function readSetting( string $key ): ?string
     {
-        if ( ! Schema::hasTable( 'settings' ) ) {
+        if ( ! $this->settingsTableAvailable() ) {
             return null;
         }
 
@@ -268,7 +347,7 @@ final class BudgetSettings
      */
     protected function writeSetting( string $key, ?string $value, string $type ): void
     {
-        if ( ! Schema::hasTable( 'settings' ) ) {
+        if ( ! $this->settingsTableAvailable() ) {
             return;
         }
 
@@ -284,5 +363,27 @@ final class BudgetSettings
             [ 'key' => $key ],
             [ 'value' => $value, 'type' => $type ],
         );
+    }
+
+    /**
+     * Memoised `Schema::hasTable('settings')` probe.
+     *
+     * Rendering the admin banner triggers `monthlyCap()`, `currentBanner()`,
+     * and `warningSentFor()` in quick succession — three probes to
+     * `information_schema` per page render without memoisation. Cache the
+     * outcome for the object's lifetime. Callers that create the table
+     * mid-request can reset via `resetSettingsTableProbe()`.
+     *
+     * @since 1.0.0
+     *
+     * @return bool
+     */
+    protected function settingsTableAvailable(): bool
+    {
+        if ( null === $this->settingsTableExists ) {
+            $this->settingsTableExists = Schema::hasTable( 'settings' );
+        }
+
+        return $this->settingsTableExists;
     }
 }

@@ -23,6 +23,7 @@ use Illuminate\Contracts\Mail\Factory as MailFactory;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Carbon;
 
@@ -64,31 +65,45 @@ class CheckBudgetThresholdJob implements ShouldQueue
         MailFactory $mailer,
         Dispatcher $events,
     ): void {
-        $now      = Carbon::now();
-        $month    = $now->format( 'Y-m' );
-        $cap      = $settings->monthlyCap();
-        $existing = $settings->currentBanner();
-
-        // New month: clear any leftover banner from last cycle.
-        if ( null !== $existing && $existing['month'] !== $month ) {
-            $settings->clearBanner();
-        }
+        $now   = Carbon::now();
+        $month = $now->format( 'Y-m' );
+        $cap   = $settings->monthlyCap();
 
         if ( null === $cap || $cap <= 0 ) {
             return;
+        }
+
+        // Clear any leftover banner from the prior month before we start
+        // the spend check for this month. Use storedBanner() rather than
+        // currentBanner() — the latter self-filters to the current month,
+        // so it would return null for the very rows we need to clear.
+        $existing = $settings->storedBanner();
+
+        if ( null !== $existing && $existing['month'] !== $month ) {
+            $settings->clearBanner();
         }
 
         if ( $settings->warningSentFor( $month ) ) {
             return;
         }
 
-        $spent      = $repository->monthToDateCost( $now );
-        $threshold  = $settings->warningThresholdPercentage();
-        $trigger    = $cap * ( $threshold / 100 );
+        $spent     = $repository->monthToDateCost( $now );
+        $threshold = $settings->warningThresholdPercentage();
+        $trigger   = $cap * ( $threshold / 100 );
 
         if ( $spent < $trigger ) {
             return;
         }
+
+        // Mark BEFORE dispatching mail so a retry after a crash between
+        // queue-push and mark can't send a second warning. Combined with
+        // the WithoutOverlapping middleware below, this closes the race
+        // both on retry and on concurrent dispatch. Failure mode is at
+        // most one *dropped* email (never a duplicate), which is the
+        // safer direction — the RFC promises "at most one email per
+        // calendar month".
+        $settings->markWarningSentFor( $month );
+        $settings->setBanner( $month, $spent, $cap, $threshold );
 
         foreach ( $settings->warningRecipients() as $recipient ) {
             $mailer->mailer()->to( $recipient )->queue(
@@ -96,14 +111,28 @@ class CheckBudgetThresholdJob implements ShouldQueue
             );
         }
 
-        $settings->markWarningSentFor( $month );
-        $settings->setBanner( $month, $spent, $cap, $threshold );
-
         $events->dispatch( new BudgetThresholdCrossed(
             month: $month,
             spentUsd: $spent,
             capUsd: $cap,
             thresholdPercentage: $threshold,
         ) );
+    }
+
+    /**
+     * Queue middleware — prevent two workers from racing on the same
+     * calendar month's warning check.
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, mixed>
+     */
+    public function middleware(): array
+    {
+        return [
+            ( new WithoutOverlapping( 'ai-budget-threshold:' . Carbon::now()->format( 'Y-m' ) ) )
+                ->releaseAfter( 60 )
+                ->expireAfter( 300 ),
+        ];
     }
 }

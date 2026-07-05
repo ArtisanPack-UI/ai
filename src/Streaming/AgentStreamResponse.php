@@ -39,31 +39,48 @@ final class AgentStreamResponse
      */
     public static function forAgent( ArtisanPackAgent $agent ): StreamedResponse
     {
-        return new StreamedResponse( function () use ( $agent ): void {
-            $agent->streamTo( function ( string $chunk ): void {
+        // Preserve any caller-supplied callback (metrics, audit log, WS
+        // bridge) by chaining it after the SSE write. Silently overwriting
+        // it would break wiring the caller wired up on purpose.
+        $existing = $agent->streamCallback();
+
+        return new StreamedResponse( function () use ( $agent, $existing ): void {
+            $agent->streamTo( function ( string $chunk, string $accumulated ) use ( $existing ): void {
                 echo 'data: ' . json_encode( [ 'chunk' => $chunk ] ) . "\n\n";
+                self::flushBuffer();
 
-                if ( function_exists( 'ob_flush' ) ) {
-                    @ob_flush();
+                if ( null !== $existing ) {
+                    $existing( $chunk, $accumulated );
                 }
-
-                flush();
             } );
 
             $result = $agent->run();
 
             echo 'event: complete' . "\n";
             echo 'data: ' . json_encode( [ 'output' => $result ] ) . "\n\n";
-
-            if ( function_exists( 'ob_flush' ) ) {
-                @ob_flush();
-            }
-
-            flush();
+            self::flushBuffer();
         }, 200, [
             'Content-Type'      => 'text/event-stream',
             'Cache-Control'     => 'no-cache, no-store, must-revalidate',
             'X-Accel-Buffering' => 'no',
         ] );
+    }
+
+    /**
+     * Flush any active output buffer up to the SAPI. Guards on
+     * `ob_get_level()` so we don't fire an E_NOTICE for every chunk when
+     * no buffer is active (PHP-FPM with `output_buffering=Off`).
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function flushBuffer(): void
+    {
+        if ( ob_get_level() > 0 ) {
+            ob_flush();
+        }
+
+        flush();
     }
 }

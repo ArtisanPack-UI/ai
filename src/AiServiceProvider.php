@@ -103,6 +103,17 @@ class AiServiceProvider extends ServiceProvider
                 $app->make( ConnectionResolverInterface::class ),
             );
         } );
+
+        // Singleton binding so the memoised table probe on the listener
+        // survives across every AgentUsageRecorded event within a request
+        // / queue worker.
+        $this->app->singleton( PersistAgentUsage::class, function ( $app ) {
+            return new PersistAgentUsage(
+                $app->make( Repository::class ),
+                $app->make( CostEstimator::class ),
+                $app->make( ConnectionResolverInterface::class ),
+            );
+        } );
     }
 
     /**
@@ -120,9 +131,11 @@ class AiServiceProvider extends ServiceProvider
                 __DIR__ . '/../config/ai.php' => config_path( 'artisanpack/ai.php' ),
             ], 'artisanpack-package-config' );
 
-            $this->publishes( [
-                __DIR__ . '/../database/migrations' => database_path( 'migrations' ),
-            ], 'artisanpack-ai-migrations' );
+            // Migrations are auto-loaded via loadMigrationsFrom() above.
+            // We intentionally do NOT expose a `vendor:publish` tag for them
+            // — publishing a copy while the package's own migrations are
+            // still discovered would produce two migrations attempting to
+            // create the same table on the next `php artisan migrate`.
 
             $this->publishes( [
                 __DIR__ . '/../resources/views' => resource_path( 'views/vendor/artisanpack-ai' ),
@@ -133,9 +146,14 @@ class AiServiceProvider extends ServiceProvider
             ] );
         }
 
-        /** @var Dispatcher $events */
-        $events = $this->app->make( Dispatcher::class );
-        $events->listen( AgentUsageRecorded::class, [ PersistAgentUsage::class, 'handle' ] );
+        // Only wire the usage-persistence listener when tracking is enabled.
+        // Otherwise every AgentUsageRecorded event still resolves the
+        // listener from the container and reads config for a no-op.
+        if ( (bool) config( 'artisanpack.ai.usage.enabled', true ) ) {
+            /** @var Dispatcher $events */
+            $events = $this->app->make( Dispatcher::class );
+            $events->listen( AgentUsageRecorded::class, [ PersistAgentUsage::class, 'handle' ] );
+        }
 
         $this->wireSettingsToggleStore();
         $this->autoDiscoverFeatures();

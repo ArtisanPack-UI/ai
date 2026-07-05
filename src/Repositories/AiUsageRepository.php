@@ -235,13 +235,12 @@ final class AiUsageRepository
     }
 
     /**
-     * Return the SQL expression that produces a bucket label.
+     * Return the driver-appropriate SQL expression that produces a bucket
+     * label for `day` / `week` / `month`.
      *
-     * SQLite is used in tests and by many hosts; the expression here is
-     * portable across SQLite / MySQL / MariaDB / Postgres via the standard
-     * `strftime` (SQLite) or `DATE_FORMAT` (MySQL). To keep the surface
-     * small we ship a SQLite-compatible form and rely on downstream apps
-     * to override if they need a different dialect.
+     * SQLite, MySQL/MariaDB, and Postgres each ship different date
+     * functions — this method dispatches on the active connection's driver
+     * so `byPeriod()` returns the same bucket shape everywhere.
      *
      * @since 1.0.0
      *
@@ -251,10 +250,24 @@ final class AiUsageRepository
      */
     protected function bucketExpression( string $bucket ): string
     {
-        return match ( $bucket ) {
-            'week'  => "strftime('%Y-%W', created_at)",
-            'month' => "strftime('%Y-%m', created_at)",
-            default => "strftime('%Y-%m-%d', created_at)",
+        $driver = $this->db->connection()->getDriverName();
+
+        return match ( $driver ) {
+            'mysql', 'mariadb' => match ( $bucket ) {
+                'week'  => "DATE_FORMAT(created_at, '%Y-%u')",
+                'month' => "DATE_FORMAT(created_at, '%Y-%m')",
+                default => "DATE_FORMAT(created_at, '%Y-%m-%d')",
+            },
+            'pgsql' => match ( $bucket ) {
+                'week'  => "to_char(created_at, 'IYYY-IW')",
+                'month' => "to_char(created_at, 'YYYY-MM')",
+                default => "to_char(created_at, 'YYYY-MM-DD')",
+            },
+            default => match ( $bucket ) {
+                'week'  => "strftime('%Y-%W', created_at)",
+                'month' => "strftime('%Y-%m', created_at)",
+                default => "strftime('%Y-%m-%d', created_at)",
+            },
         };
     }
 }
