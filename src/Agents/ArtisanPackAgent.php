@@ -84,6 +84,43 @@ abstract class ArtisanPackAgent
     public string $defaultModel = 'haiku';
 
     /**
+     * Whether this agent's responses are cacheable.
+     *
+     * Subclasses can opt out of the read-through cache by setting this to
+     * `false`. Combined with the `artisanpack.ai.cache.enabled` config flag,
+     * both must be truthy for cache reads/writes to happen.
+     *
+     * @since 1.0.0
+     *
+     * @var bool
+     */
+    public bool $cacheable = true;
+
+    /**
+     * Per-agent cache TTL override in seconds.
+     *
+     * Zero (the default) means: defer to `artisanpack.ai.cache.ttl`.
+     *
+     * @since 1.0.0
+     *
+     * @var int
+     */
+    public int $cacheTtl = 0;
+
+    /**
+     * Whether streaming is the default execution mode for this agent.
+     *
+     * The RFC calls for streaming on by default for long-running agents
+     * (content analysis, summaries, digests). Subclasses can flip this to
+     * `false` to force the non-streaming path.
+     *
+     * @since 1.0.0
+     *
+     * @var bool
+     */
+    public bool $stream = false;
+
+    /**
      * Input payload the agent will operate on.
      *
      * @since 1.0.0
@@ -121,6 +158,18 @@ abstract class ArtisanPackAgent
     protected bool $streaming = false;
 
     /**
+     * Optional per-run chunk callback used when streaming.
+     *
+     * When set, subclasses that stream should invoke this callback with each
+     * emitted chunk (see `emitChunk()`).
+     *
+     * @since 1.0.0
+     *
+     * @var callable|null
+     */
+    protected $streamCallback = null;
+
+    /**
      * System prompt/instructions the agent should follow.
      *
      * @since 1.0.0
@@ -150,8 +199,17 @@ abstract class ArtisanPackAgent
     public static function for( mixed $input ): static
     {
         /** @var static $agent */
-        $agent        = app( static::class );
-        $agent->input = $input;
+        $agent = app( static::class );
+
+        // Reset every run-scoped field so a container-singleton binding
+        // (documented in docs/overriding-agents.md) or an Octane-cached
+        // instance can't leak run N-1's callback, credentials, or model
+        // override into run N.
+        $agent->input              = $input;
+        $agent->streaming          = $agent->stream;
+        $agent->streamCallback     = null;
+        $agent->credentialOverride = null;
+        $agent->modelOverride      = null;
 
         return $agent;
     }
@@ -218,6 +276,42 @@ abstract class ArtisanPackAgent
     }
 
     /**
+     * Register a per-chunk callback and enable streaming for this run.
+     *
+     * The callback receives the current chunk (string) plus the accumulated
+     * text so far. Registering a callback also implies `->withStreaming()`.
+     *
+     * @since 1.0.0
+     *
+     * @param  callable  $onChunk  `function ( string $chunk, string $accumulated ): void`.
+     *
+     * @return static
+     */
+    public function streamTo( callable $onChunk ): static
+    {
+        $this->streamCallback = $onChunk;
+        $this->streaming      = true;
+
+        return $this;
+    }
+
+    /**
+     * Return the currently registered stream callback, if any.
+     *
+     * Exposed so transport wrappers (e.g. `AgentStreamResponse`) can
+     * compose with a caller-supplied callback instead of silently
+     * overwriting it.
+     *
+     * @since 1.0.0
+     *
+     * @return callable|null
+     */
+    public function streamCallback(): ?callable
+    {
+        return $this->streamCallback;
+    }
+
+    /**
      * Execute the agent and return validated output.
      *
      * The default pipeline is:
@@ -256,14 +350,22 @@ abstract class ArtisanPackAgent
 
         $model = $this->resolveModel( $container, $credentials );
 
-        $cache = $this->cacheStore( $container );
+        // Only skip cache when the caller is actively consuming a stream
+        // (has registered a chunk callback). A $stream=true agent invoked
+        // from a batch/warm-up path with no callback should still enjoy
+        // cache hits — the RFC intent is that cached responses return
+        // whole, not that streaming disables caching altogether.
+        $isConsumingStream = $this->streaming && null !== $this->streamCallback;
+        $cache             = ( $isConsumingStream || ! $this->cacheable )
+            ? null
+            : $this->cacheStore( $container );
 
         if ( null !== $cache ) {
             $cacheKey = $this->cacheKey( $model );
             $cached   = $cache->get( $cacheKey );
 
             if ( is_array( $cached ) ) {
-                $this->recordUsage( $container, $model, 0, 0, true );
+                $this->recordUsage( $container, $model, 0, 0, true, $credentials );
 
                 return $cached;
             }
@@ -271,8 +373,8 @@ abstract class ArtisanPackAgent
 
         $result = $this->execute( $credentials, $model );
 
-        if ( null !== $cache && isset( $cacheKey ) ) {
-            $cache->put( $cacheKey, $result['output'], $this->cacheTtl( $container ) );
+        if ( null !== $cache ) {
+            $cache->put( $cacheKey, $result['output'], $this->resolveCacheTtl( $container ) );
         }
 
         $this->recordUsage(
@@ -281,9 +383,33 @@ abstract class ArtisanPackAgent
             (int) ( $result['input_tokens'] ?? 0 ),
             (int) ( $result['output_tokens'] ?? 0 ),
             false,
+            $credentials,
         );
 
         return $result['output'];
+    }
+
+    /**
+     * Emit a chunk through the registered stream callback, if any.
+     *
+     * Subclasses implementing streaming inside `execute()` should call this
+     * for each token/segment they receive from the provider. Returns the
+     * accumulated text so callers don't need to track it themselves.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $chunk        Chunk text.
+     * @param  string  $accumulated  Accumulated text so far (post-chunk).
+     *
+     * @return void
+     */
+    protected function emitChunk( string $chunk, string $accumulated ): void
+    {
+        if ( null === $this->streamCallback ) {
+            return;
+        }
+
+        ( $this->streamCallback )( $chunk, $accumulated );
     }
 
     /**
@@ -543,11 +669,20 @@ abstract class ArtisanPackAgent
             return null;
         }
 
+        $storeName = $config->get( 'artisanpack.ai.cache.store' );
+
+        if ( is_string( $storeName ) && '' !== $storeName ) {
+            /** @var \Illuminate\Contracts\Cache\Factory $factory */
+            $factory = $container->make( 'cache' );
+
+            return $factory->store( $storeName );
+        }
+
         return $container->make( 'cache.store' );
     }
 
     /**
-     * Cache TTL in seconds.
+     * Effective cache TTL in seconds: per-agent override → config default.
      *
      * @since 1.0.0
      *
@@ -555,8 +690,12 @@ abstract class ArtisanPackAgent
      *
      * @return int
      */
-    protected function cacheTtl( Container $container ): int
+    protected function resolveCacheTtl( Container $container ): int
     {
+        if ( $this->cacheTtl > 0 ) {
+            return $this->cacheTtl;
+        }
+
         /** @var ConfigRepository $config */
         $config = $container->make( ConfigRepository::class );
 
@@ -566,13 +705,19 @@ abstract class ArtisanPackAgent
     /**
      * Dispatch the usage-tracking event.
      *
+     * `$credentials` is appended (nullable) rather than inserted in the
+     * middle of the arg list so any existing subclass that still overrides
+     * the pre-1.0 5-arg signature keeps type-compatible — it simply loses
+     * the `provider` field on the event until it's updated.
+     *
      * @since 1.0.0
      *
-     * @param  Container  $container    Service container.
-     * @param  string     $model        Resolved model identifier.
-     * @param  int        $inputTokens  Input token count.
-     * @param  int        $outputTokens Output token count.
-     * @param  bool       $cacheHit     Whether the response was served from cache.
+     * @param  Container         $container    Service container.
+     * @param  string            $model        Resolved model identifier.
+     * @param  int               $inputTokens  Input token count.
+     * @param  int               $outputTokens Output token count.
+     * @param  bool              $cacheHit     Whether the response was served from cache.
+     * @param  Credentials|null  $credentials  Resolved credentials (source of `provider`).
      *
      * @return void
      */
@@ -582,6 +727,7 @@ abstract class ArtisanPackAgent
         int $inputTokens,
         int $outputTokens,
         bool $cacheHit,
+        ?Credentials $credentials = null,
     ): void {
         /** @var Dispatcher $events */
         $events = $container->make( Dispatcher::class );
@@ -593,6 +739,7 @@ abstract class ArtisanPackAgent
             inputTokens: $inputTokens,
             outputTokens: $outputTokens,
             cacheHit: $cacheHit,
+            provider: null !== $credentials ? $credentials->provider : '',
         ) );
     }
 }

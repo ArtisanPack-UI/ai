@@ -18,9 +18,16 @@ use ArtisanPackUI\Ai\Contracts\CredentialResolver;
 use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
 use ArtisanPackUI\Ai\Credentials\ChainedCredentialResolver;
 use ArtisanPackUI\Ai\Credentials\SettingsCredentialStore;
+use ArtisanPackUI\Ai\Events\AgentUsageRecorded;
+use ArtisanPackUI\Ai\Listeners\PersistAgentUsage;
 use ArtisanPackUI\Ai\Registry\ArrayFeatureRegistry;
+use ArtisanPackUI\Ai\Repositories\AiUsageRepository;
+use ArtisanPackUI\Ai\Support\BudgetSettings;
+use ArtisanPackUI\Ai\Support\CostEstimator;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Encryption\Encrypter;
+use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
@@ -81,6 +88,32 @@ class AiServiceProvider extends ServiceProvider
                 $app->make( CredentialResolver::class ),
             );
         } );
+
+        $this->app->singleton( CostEstimator::class, function ( $app ) {
+            return new CostEstimator( $app->make( Repository::class ) );
+        } );
+
+        $this->app->singleton( AiUsageRepository::class, function ( $app ) {
+            return new AiUsageRepository( $app->make( ConnectionResolverInterface::class ) );
+        } );
+
+        $this->app->singleton( BudgetSettings::class, function ( $app ) {
+            return new BudgetSettings(
+                $app->make( Repository::class ),
+                $app->make( ConnectionResolverInterface::class ),
+            );
+        } );
+
+        // Singleton binding so the memoised table probe on the listener
+        // survives across every AgentUsageRecorded event within a request
+        // / queue worker.
+        $this->app->singleton( PersistAgentUsage::class, function ( $app ) {
+            return new PersistAgentUsage(
+                $app->make( Repository::class ),
+                $app->make( CostEstimator::class ),
+                $app->make( ConnectionResolverInterface::class ),
+            );
+        } );
     }
 
     /**
@@ -90,14 +123,36 @@ class AiServiceProvider extends ServiceProvider
     {
         $this->mergeConfiguration();
 
+        $this->loadMigrationsFrom( __DIR__ . '/../database/migrations' );
+        $this->loadViewsFrom( __DIR__ . '/../resources/views', 'artisanpack-ai' );
+
         if ( $this->app->runningInConsole() ) {
             $this->publishes( [
                 __DIR__ . '/../config/ai.php' => config_path( 'artisanpack/ai.php' ),
             ], 'artisanpack-package-config' );
 
+            // Migrations are auto-loaded via loadMigrationsFrom() above.
+            // We intentionally do NOT expose a `vendor:publish` tag for them
+            // — publishing a copy while the package's own migrations are
+            // still discovered would produce two migrations attempting to
+            // create the same table on the next `php artisan migrate`.
+
+            $this->publishes( [
+                __DIR__ . '/../resources/views' => resource_path( 'views/vendor/artisanpack-ai' ),
+            ], 'artisanpack-ai-views' );
+
             $this->commands( [
                 RotateAiCredentialsCommand::class,
             ] );
+        }
+
+        // Only wire the usage-persistence listener when tracking is enabled.
+        // Otherwise every AgentUsageRecorded event still resolves the
+        // listener from the container and reads config for a no-op.
+        if ( (bool) config( 'artisanpack.ai.usage.enabled', true ) ) {
+            /** @var Dispatcher $events */
+            $events = $this->app->make( Dispatcher::class );
+            $events->listen( AgentUsageRecorded::class, [ PersistAgentUsage::class, 'handle' ] );
         }
 
         $this->wireSettingsToggleStore();

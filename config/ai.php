@@ -50,14 +50,85 @@ return [
     |--------------------------------------------------------------------------
     |
     | Agent responses can be cached by (feature, model, input) content hash to
-    | avoid redundant provider calls. When disabled the agent always calls
-    | the provider.
+    | avoid redundant provider calls. Set `store` to route to a dedicated
+    | cache store (falls back to the default when null). Individual agents
+    | may opt out with `public bool $cacheable = false;` or override the TTL
+    | with `public int $cacheTtl = ...;`.
     |
     */
 
     'cache' => [
         'enabled' => env( 'ARTISANPACK_AI_CACHE_ENABLED', false ),
-        'ttl'     => (int) env( 'ARTISANPACK_AI_CACHE_TTL', 3600 ),
+        'ttl'     => (int) env( 'ARTISANPACK_AI_CACHE_TTL', 2592000 ),
+        'store'   => env( 'ARTISANPACK_AI_CACHE_STORE' ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Usage Tracking
+    |--------------------------------------------------------------------------
+    |
+    | The package writes one `ai_usage_events` row per agent run when
+    | `enabled` is true. `retention_days` controls how long rows survive
+    | before the `PurgeUsageEventsJob` removes them (0 disables purging).
+    |
+    */
+
+    'usage' => [
+        'enabled'        => env( 'ARTISANPACK_AI_USAGE_ENABLED', true ),
+        'retention_days' => (int) env( 'ARTISANPACK_AI_USAGE_RETENTION_DAYS', 90 ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Budget Warnings
+    |--------------------------------------------------------------------------
+    |
+    | Soft warning at `warning_percentage`% of the user-configured monthly
+    | cap. The cap itself lives in the `settings` table under
+    | `ai.monthly_budget_usd` and is nullable — no cap means no warning.
+    | Recipients receive the `BudgetWarningMail` at most once per calendar
+    | month.
+    |
+    */
+
+    'budget' => [
+        'warning_percentage' => (float) env( 'ARTISANPACK_AI_BUDGET_WARNING_PERCENTAGE', 80 ),
+        'monthly_usd'        => env( 'ARTISANPACK_AI_BUDGET_MONTHLY_USD' ),
+        'recipients'         => array_values( array_filter( array_map(
+            'trim',
+            explode( ',', (string) env( 'ARTISANPACK_AI_BUDGET_RECIPIENTS', '' ) ),
+        ) ) ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pricing (per 1K tokens)
+    |--------------------------------------------------------------------------
+    |
+    | Rate table used by `CostEstimator` to attach `estimated_cost_usd` to
+    | each usage row. Overridable via the published config. Unknown
+    | provider/model combinations resolve to $0 — safe fallback, but you
+    | won't see cost data for them until you add an entry.
+    |
+    */
+
+    'pricing' => [
+
+        'anthropic' => [
+            'claude-3-5-haiku'  => [ 'input_per_1k' => 0.0008, 'output_per_1k' => 0.004 ],
+            'claude-3-5-sonnet' => [ 'input_per_1k' => 0.003,  'output_per_1k' => 0.015 ],
+            'claude-3-opus'     => [ 'input_per_1k' => 0.015,  'output_per_1k' => 0.075 ],
+            'haiku'             => [ 'input_per_1k' => 0.0008, 'output_per_1k' => 0.004 ],
+            'sonnet'            => [ 'input_per_1k' => 0.003,  'output_per_1k' => 0.015 ],
+            'opus'              => [ 'input_per_1k' => 0.015,  'output_per_1k' => 0.075 ],
+        ],
+
+        'openai' => [
+            'gpt-4o'      => [ 'input_per_1k' => 0.0025, 'output_per_1k' => 0.01 ],
+            'gpt-4o-mini' => [ 'input_per_1k' => 0.00015, 'output_per_1k' => 0.0006 ],
+        ],
+
     ],
 
     /*
