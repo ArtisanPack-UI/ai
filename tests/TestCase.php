@@ -25,6 +25,22 @@ abstract class TestCase extends BaseTestCase
     }
 
     /**
+     * Create the test-only `settings` table used by the credential store
+     * and toggle store tests.
+     *
+     * Call from an individual test with `$this->createSettingsTable()` when
+     * cms-framework Settings semantics are needed.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function createSettingsTable(): void
+    {
+        ( new Support\Migrations\CreateSettingsTable() )->up();
+    }
+
+    /**
      * Gets package providers.
      *
      * @since 1.0.0

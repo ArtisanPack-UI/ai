@@ -30,6 +30,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Top-Level Credentials
+    |--------------------------------------------------------------------------
+    |
+    | Optional shared credentials used by the CredentialResolver's env branch.
+    | Env vars take precedence; these config keys act as a fallback for
+    | environments where env vars aren't available (e.g. hosted docs sites).
+    | Do NOT commit real API keys to source control.
+    |
+    */
+
+    'api_key'       => env( 'ARTISANPACK_AI_API_KEY' ),
+    'default_model' => env( 'ARTISANPACK_AI_DEFAULT_MODEL' ),
+    'base_url'      => env( 'ARTISANPACK_AI_BASE_URL' ),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cache
+    |--------------------------------------------------------------------------
+    |
+    | Agent responses can be cached by (feature, model, input) content hash to
+    | avoid redundant provider calls. When disabled the agent always calls
+    | the provider.
+    |
+    */
+
+    'cache' => [
+        'enabled' => env( 'ARTISANPACK_AI_CACHE_ENABLED', false ),
+        'ttl'     => (int) env( 'ARTISANPACK_AI_CACHE_TTL', 3600 ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Providers & Credentials
     |--------------------------------------------------------------------------
     |

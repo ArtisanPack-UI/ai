@@ -3,10 +3,6 @@
 /**
  * Ai service provider.
  *
- * Bootstraps the Ai package: registers container singletons for future
- * foundation classes and merges/publishes the package configuration under
- * the shared `artisanpack.ai` config key.
- *
  * @package    ArtisanPack_UI
  * @subpackage Ai
  *
@@ -17,10 +13,26 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ai;
 
+use ArtisanPackUI\Ai\Console\Commands\RotateAiCredentialsCommand;
+use ArtisanPackUI\Ai\Contracts\CredentialResolver;
+use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
+use ArtisanPackUI\Ai\Credentials\ChainedCredentialResolver;
+use ArtisanPackUI\Ai\Credentials\SettingsCredentialStore;
+use ArtisanPackUI\Ai\Registry\ArrayFeatureRegistry;
+use Illuminate\Contracts\Config\Repository;
+use Illuminate\Contracts\Encryption\Encrypter;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
+use LogicException;
 
 /**
  * Service provider for the Ai package.
+ *
+ * Wires the frozen contract surface (`ArtisanPackAgent`, `FeatureRegistry`,
+ * `CredentialResolver`) into the container, publishes the shared config,
+ * auto-discovers features from provider `aiFeatures()` methods, and hooks
+ * the cms-framework Settings store when the `settings` table is available.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ai
@@ -30,15 +42,7 @@ use Illuminate\Support\ServiceProvider;
 class AiServiceProvider extends ServiceProvider
 {
     /**
-     * Registers any application services.
-     *
-     * Binds the main Ai class as a singleton so downstream code can resolve
-     * it via the facade, helper, or container. Additional foundation
-     * singletons will be registered here as the RFC is implemented.
-     *
-     * @since 1.0.0
-     *
-     * @return void
+     * {@inheritDoc}
      */
     public function register(): void
     {
@@ -50,18 +54,37 @@ class AiServiceProvider extends ServiceProvider
         $this->app->singleton( 'artisanpack.ai', function ( $app ) {
             return new Ai();
         } );
+
+        $this->app->singleton( SettingsCredentialStore::class, function ( $app ) {
+            // Resolve the encrypter lazily so a runtime APP_KEY rotation is
+            // picked up on the next call — capturing the instance in the
+            // constructor would strand this singleton on the old key.
+            return new SettingsCredentialStore( fn () => $app->make( Encrypter::class ) );
+        } );
+
+        $this->app->singleton( CredentialResolver::class, function ( $app ) {
+            $resolver = new ChainedCredentialResolver( $app->make( Repository::class ) );
+
+            $store = $app->make( SettingsCredentialStore::class );
+
+            $resolver->useStore( function ( ?string $featureKey ) use ( $store ) {
+                return $store->load();
+            } );
+
+            return $resolver;
+        } );
+
+        $this->app->singleton( FeatureRegistry::class, function ( $app ) {
+            return new ArrayFeatureRegistry(
+                $app,
+                $app->make( Repository::class ),
+                $app->make( CredentialResolver::class ),
+            );
+        } );
     }
 
     /**
-     * Bootstraps any application services.
-     *
-     * Publishes the package configuration and merges defaults into the
-     * shared `artisanpack.ai` config namespace so downstream packages read
-     * from a single, consistent location.
-     *
-     * @since 1.0.0
-     *
-     * @return void
+     * {@inheritDoc}
      */
     public function boot(): void
     {
@@ -71,7 +94,14 @@ class AiServiceProvider extends ServiceProvider
             $this->publishes( [
                 __DIR__ . '/../config/ai.php' => config_path( 'artisanpack/ai.php' ),
             ], 'artisanpack-package-config' );
+
+            $this->commands( [
+                RotateAiCredentialsCommand::class,
+            ] );
         }
+
+        $this->wireSettingsToggleStore();
+        $this->autoDiscoverFeatures();
     }
 
     /**
@@ -88,5 +118,200 @@ class AiServiceProvider extends ServiceProvider
         $userConfig      = config( 'artisanpack.ai', [] );
         $mergedConfig    = array_replace_recursive( $packageDefaults, $userConfig );
         config( [ 'artisanpack.ai' => $mergedConfig ] );
+    }
+
+    /**
+     * Bind the settings-backed toggle store into the registry, if available.
+     *
+     * The registry stays functional without cms-framework — it just falls
+     * back to config-driven toggles.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function wireSettingsToggleStore(): void
+    {
+        $registry = $this->app->make( FeatureRegistry::class );
+
+        if ( ! $registry instanceof ArrayFeatureRegistry ) {
+            return;
+        }
+
+        // Memoise the settings-table probe so we don't hit information_schema
+        // on every toggle read; the ai package's own tests recreate the table
+        // between cases, so honour a fresh probe when it disappears.
+        $tableExists = null;
+        $probe       = function () use ( &$tableExists ): bool {
+            if ( null === $tableExists ) {
+                $tableExists = Schema::hasTable( 'settings' );
+            }
+
+            return $tableExists;
+        };
+
+        $registry->useToggleStore(
+            function ( string $featureKey ) use ( $probe ) {
+                if ( ! $probe() ) {
+                    return null;
+                }
+
+                $value = DB::table( 'settings' )
+                    ->where( 'key', 'ai_features.' . $featureKey . '.enabled' )
+                    ->value( 'value' );
+
+                if ( null === $value ) {
+                    return null;
+                }
+
+                // FILTER_NULL_ON_FAILURE means unparseable strings return null
+                // and the reader falls through to the in-memory / config
+                // default rather than force-disabling the feature.
+                $parsed = filter_var( $value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE );
+
+                return null === $parsed ? null : $parsed;
+            },
+            function ( string $featureKey, bool $enabled ) use ( $probe, &$tableExists ): void {
+                if ( ! $probe() ) {
+                    return;
+                }
+
+                DB::table( 'settings' )->updateOrInsert(
+                    [ 'key' => 'ai_features.' . $featureKey . '.enabled' ],
+                    [ 'value' => $enabled ? '1' : '0', 'type' => 'boolean' ],
+                );
+
+                $tableExists = true;
+            },
+        );
+    }
+
+    /**
+     * Register features from two sources, in this order:
+     *
+     *   1. The `ap.ai.register-features` filter hook — the shared
+     *      ecosystem-wide extension convention (see artisanpack-ui/icons
+     *      `ap.icons.register-icon-sets`). Callbacks receive the
+     *      `FeatureRegistry` and register directly against it.
+     *   2. A public `aiFeatures(): array` method on any loaded service
+     *      provider — the RFC-frozen fallback for packages that ship an
+     *      agent alongside a provider.
+     *
+     * The array shape returned by `aiFeatures()` is
+     * `[ featureKey => agentClass ]` or
+     * `[ featureKey => [ 'agent' => agentClass, ...meta ] ]`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function autoDiscoverFeatures(): void
+    {
+        /** @var FeatureRegistry $registry */
+        $registry = $this->app->make( FeatureRegistry::class );
+
+        $this->applyRegisterFeaturesFilter( $registry );
+        $this->discoverFeaturesFromProviders( $registry );
+    }
+
+    /**
+     * Invoke the `ap.ai.register-features` filter when the hooks helper is
+     * available.
+     *
+     * @since 1.0.0
+     *
+     * @param  FeatureRegistry  $registry  Registry to populate.
+     *
+     * @return void
+     */
+    protected function applyRegisterFeaturesFilter( FeatureRegistry $registry ): void
+    {
+        if ( ! function_exists( 'applyFilters' ) ) {
+            return;
+        }
+
+        /**
+         * Filters the AI feature registry so downstream packages can
+         * register their agents without owning a service-provider method.
+         *
+         * @since 1.0.0
+         *
+         * @hook  ap.ai.register-features
+         *
+         * @param  FeatureRegistry  $registry  Registry to populate with `register()` calls.
+         *
+         * @return FeatureRegistry
+         */
+        applyFilters( 'ap.ai.register-features', $registry );
+    }
+
+    /**
+     * Iterate loaded providers and register any features they declare.
+     *
+     * @since 1.0.0
+     *
+     * @param  FeatureRegistry  $registry  Registry to populate.
+     *
+     * @return void
+     */
+    protected function discoverFeaturesFromProviders( FeatureRegistry $registry ): void
+    {
+        foreach ( $this->app->getLoadedProviders() as $providerClass => $loaded ) {
+            if ( ! $loaded ) {
+                continue;
+            }
+
+            $provider = $this->app->resolveProvider( $providerClass );
+
+            if ( ! method_exists( $provider, 'aiFeatures' ) ) {
+                continue;
+            }
+
+            /** @var array<string, mixed> $features */
+            $features = $provider->aiFeatures();
+
+            foreach ( $features as $featureKey => $definition ) {
+                $this->registerDiscoveredFeature( $registry, (string) $featureKey, $definition );
+            }
+        }
+    }
+
+    /**
+     * Normalise and register a single discovered feature entry.
+     *
+     * @since 1.0.0
+     *
+     * @param  FeatureRegistry  $registry    Target registry.
+     * @param  string           $featureKey  Feature key.
+     * @param  mixed            $definition  Raw definition — string agent class or `[ 'agent' => ..., ...meta ]`.
+     *
+     * @return void
+     */
+    protected function registerDiscoveredFeature( FeatureRegistry $registry, string $featureKey, mixed $definition ): void
+    {
+        $agentClass = null;
+        $meta       = [];
+
+        if ( is_string( $definition ) ) {
+            $agentClass = $definition;
+        } elseif ( is_array( $definition ) && isset( $definition['agent'] ) ) {
+            $agentClass = (string) $definition['agent'];
+            unset( $definition['agent'] );
+            $meta = $definition;
+        }
+
+        if ( null === $agentClass || '' === $agentClass ) {
+            return;
+        }
+
+        if ( ! class_exists( $agentClass ) ) {
+            throw new LogicException( sprintf(
+                'AI feature "%s" declared agent class %s, which does not exist.',
+                $featureKey,
+                $agentClass,
+            ) );
+        }
+
+        $registry->register( $featureKey, $agentClass, $meta );
     }
 }
