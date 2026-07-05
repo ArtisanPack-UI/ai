@@ -84,6 +84,43 @@ abstract class ArtisanPackAgent
     public string $defaultModel = 'haiku';
 
     /**
+     * Whether this agent's responses are cacheable.
+     *
+     * Subclasses can opt out of the read-through cache by setting this to
+     * `false`. Combined with the `artisanpack.ai.cache.enabled` config flag,
+     * both must be truthy for cache reads/writes to happen.
+     *
+     * @since 1.0.0
+     *
+     * @var bool
+     */
+    public bool $cacheable = true;
+
+    /**
+     * Per-agent cache TTL override in seconds.
+     *
+     * Zero (the default) means: defer to `artisanpack.ai.cache.ttl`.
+     *
+     * @since 1.0.0
+     *
+     * @var int
+     */
+    public int $cacheTtl = 0;
+
+    /**
+     * Whether streaming is the default execution mode for this agent.
+     *
+     * The RFC calls for streaming on by default for long-running agents
+     * (content analysis, summaries, digests). Subclasses can flip this to
+     * `false` to force the non-streaming path.
+     *
+     * @since 1.0.0
+     *
+     * @var bool
+     */
+    public bool $stream = false;
+
+    /**
      * Input payload the agent will operate on.
      *
      * @since 1.0.0
@@ -121,6 +158,18 @@ abstract class ArtisanPackAgent
     protected bool $streaming = false;
 
     /**
+     * Optional per-run chunk callback used when streaming.
+     *
+     * When set, subclasses that stream should invoke this callback with each
+     * emitted chunk (see `emitChunk()`).
+     *
+     * @since 1.0.0
+     *
+     * @var callable|null
+     */
+    protected $streamCallback = null;
+
+    /**
      * System prompt/instructions the agent should follow.
      *
      * @since 1.0.0
@@ -150,8 +199,9 @@ abstract class ArtisanPackAgent
     public static function for( mixed $input ): static
     {
         /** @var static $agent */
-        $agent        = app( static::class );
-        $agent->input = $input;
+        $agent            = app( static::class );
+        $agent->input     = $input;
+        $agent->streaming = $agent->stream;
 
         return $agent;
     }
@@ -218,6 +268,26 @@ abstract class ArtisanPackAgent
     }
 
     /**
+     * Register a per-chunk callback and enable streaming for this run.
+     *
+     * The callback receives the current chunk (string) plus the accumulated
+     * text so far. Registering a callback also implies `->withStreaming()`.
+     *
+     * @since 1.0.0
+     *
+     * @param  callable  $onChunk  `function ( string $chunk, string $accumulated ): void`.
+     *
+     * @return static
+     */
+    public function streamTo( callable $onChunk ): static
+    {
+        $this->streamCallback = $onChunk;
+        $this->streaming      = true;
+
+        return $this;
+    }
+
+    /**
      * Execute the agent and return validated output.
      *
      * The default pipeline is:
@@ -256,14 +326,18 @@ abstract class ArtisanPackAgent
 
         $model = $this->resolveModel( $container, $credentials );
 
-        $cache = $this->cacheStore( $container );
+        // Streaming and non-cacheable agents bypass the cache. Cached
+        // responses would arrive whole and defeat the streaming contract.
+        $cache = ( $this->streaming || ! $this->cacheable )
+            ? null
+            : $this->cacheStore( $container );
 
         if ( null !== $cache ) {
             $cacheKey = $this->cacheKey( $model );
             $cached   = $cache->get( $cacheKey );
 
             if ( is_array( $cached ) ) {
-                $this->recordUsage( $container, $model, 0, 0, true );
+                $this->recordUsage( $container, $credentials, $model, 0, 0, true );
 
                 return $cached;
             }
@@ -272,11 +346,12 @@ abstract class ArtisanPackAgent
         $result = $this->execute( $credentials, $model );
 
         if ( null !== $cache && isset( $cacheKey ) ) {
-            $cache->put( $cacheKey, $result['output'], $this->cacheTtl( $container ) );
+            $cache->put( $cacheKey, $result['output'], $this->resolveCacheTtl( $container ) );
         }
 
         $this->recordUsage(
             $container,
+            $credentials,
             $model,
             (int) ( $result['input_tokens'] ?? 0 ),
             (int) ( $result['output_tokens'] ?? 0 ),
@@ -284,6 +359,29 @@ abstract class ArtisanPackAgent
         );
 
         return $result['output'];
+    }
+
+    /**
+     * Emit a chunk through the registered stream callback, if any.
+     *
+     * Subclasses implementing streaming inside `execute()` should call this
+     * for each token/segment they receive from the provider. Returns the
+     * accumulated text so callers don't need to track it themselves.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $chunk        Chunk text.
+     * @param  string  $accumulated  Accumulated text so far (post-chunk).
+     *
+     * @return void
+     */
+    protected function emitChunk( string $chunk, string $accumulated ): void
+    {
+        if ( null === $this->streamCallback ) {
+            return;
+        }
+
+        ( $this->streamCallback )( $chunk, $accumulated );
     }
 
     /**
@@ -543,11 +641,20 @@ abstract class ArtisanPackAgent
             return null;
         }
 
+        $storeName = $config->get( 'artisanpack.ai.cache.store' );
+
+        if ( is_string( $storeName ) && '' !== $storeName ) {
+            /** @var \Illuminate\Contracts\Cache\Factory $factory */
+            $factory = $container->make( 'cache' );
+
+            return $factory->store( $storeName );
+        }
+
         return $container->make( 'cache.store' );
     }
 
     /**
-     * Cache TTL in seconds.
+     * Effective cache TTL in seconds: per-agent override → config default.
      *
      * @since 1.0.0
      *
@@ -555,8 +662,12 @@ abstract class ArtisanPackAgent
      *
      * @return int
      */
-    protected function cacheTtl( Container $container ): int
+    protected function resolveCacheTtl( Container $container ): int
     {
+        if ( $this->cacheTtl > 0 ) {
+            return $this->cacheTtl;
+        }
+
         /** @var ConfigRepository $config */
         $config = $container->make( ConfigRepository::class );
 
@@ -568,16 +679,18 @@ abstract class ArtisanPackAgent
      *
      * @since 1.0.0
      *
-     * @param  Container  $container    Service container.
-     * @param  string     $model        Resolved model identifier.
-     * @param  int        $inputTokens  Input token count.
-     * @param  int        $outputTokens Output token count.
-     * @param  bool       $cacheHit     Whether the response was served from cache.
+     * @param  Container    $container    Service container.
+     * @param  Credentials  $credentials  Resolved credentials (source of `provider`).
+     * @param  string       $model        Resolved model identifier.
+     * @param  int          $inputTokens  Input token count.
+     * @param  int          $outputTokens Output token count.
+     * @param  bool         $cacheHit     Whether the response was served from cache.
      *
      * @return void
      */
     protected function recordUsage(
         Container $container,
+        Credentials $credentials,
         string $model,
         int $inputTokens,
         int $outputTokens,
@@ -593,6 +706,7 @@ abstract class ArtisanPackAgent
             inputTokens: $inputTokens,
             outputTokens: $outputTokens,
             cacheHit: $cacheHit,
+            provider: $credentials->provider ?? '',
         ) );
     }
 }

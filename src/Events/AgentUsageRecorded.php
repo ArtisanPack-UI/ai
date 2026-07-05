@@ -34,6 +34,7 @@ final class AgentUsageRecorded
      * @param  int     $inputTokens   Input token count.
      * @param  int     $outputTokens  Output token count.
      * @param  bool    $cacheHit      Whether the response came from cache.
+     * @param  string  $provider      Provider name (e.g. `anthropic`, `openai`).
      */
     public function __construct(
         public readonly string $featureKey,
@@ -42,6 +43,7 @@ final class AgentUsageRecorded
         public readonly int $inputTokens,
         public readonly int $outputTokens,
         public readonly bool $cacheHit = false,
+        public readonly string $provider = '',
     ) {
     }
 }
