@@ -11,6 +11,7 @@ use Tests\Support\FakeAgent;
 
 beforeEach( function (): void {
     $this->createSettingsTable();
+    $this->clearFeatureRegistry();
 
     // Use the plain `auth` middleware so `actingAs()` works with the
     // default web guard. In production, the shipped default is

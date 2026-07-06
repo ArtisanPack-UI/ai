@@ -8,6 +8,7 @@ use ArtisanPackUI\Ai\AiServiceProvider;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\View;
 use Orchestra\Testbench\TestCase as BaseTestCase;
+use ReflectionObject;
 
 /**
  * Base Test Case
@@ -64,6 +65,38 @@ abstract class TestCase extends BaseTestCase
     protected function createSettingsTable(): void
     {
         ( new Support\Migrations\CreateSettingsTable() )->up();
+    }
+
+    /**
+     * Empty the feature registry so a test can register only what it needs.
+     *
+     * `AiServiceProvider::boot()` auto-registers the package's own
+     * cross-cutting agents (`ai.alt_text`, `ai.content_rewrite`,
+     * `ai.summarize`) via `aiFeatures()` before every test runs. Tests
+     * that assert on the exact registry contents (Livewire admin,
+     * ordering, filter tests) call this in `beforeEach` to start from a
+     * blank slate.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function clearFeatureRegistry(): void
+    {
+        $registry = $this->app->make(
+            \ArtisanPackUI\Ai\Contracts\FeatureRegistry::class,
+        );
+
+        // Registry has no public reset — reach in via reflection since
+        // this is test-only teardown.
+        $reflect  = new ReflectionObject( $registry );
+        $property = $reflect->getProperty( 'features' );
+        $property->setValue( $registry, [] );
+
+        if ( $reflect->hasProperty( 'toggles' ) ) {
+            $property = $reflect->getProperty( 'toggles' );
+            $property->setValue( $registry, [] );
+        }
     }
 
     /**

@@ -13,7 +13,11 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ai;
 
+use ArtisanPackUI\Ai\Agents\AltTextGenerationAgent;
+use ArtisanPackUI\Ai\Agents\ContentRewriteAgent;
+use ArtisanPackUI\Ai\Agents\SummarizationAgent;
 use ArtisanPackUI\Ai\Console\Commands\RotateAiCredentialsCommand;
+use ArtisanPackUI\Ai\Contracts\AgentPrompter;
 use ArtisanPackUI\Ai\Contracts\CredentialResolver;
 use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
 use ArtisanPackUI\Ai\Credentials\ChainedCredentialResolver;
@@ -26,6 +30,7 @@ use ArtisanPackUI\Ai\Support\AiSettingsRegistrar;
 use ArtisanPackUI\Ai\Support\BudgetSettings;
 use ArtisanPackUI\Ai\Support\CostEstimator;
 use ArtisanPackUI\Ai\Support\FeatureSettings;
+use ArtisanPackUI\Ai\Support\LaravelAiAgentPrompter;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -90,6 +95,12 @@ class AiServiceProvider extends ServiceProvider
                 $app->make( CredentialResolver::class ),
             );
         } );
+
+        // Bind the AgentPrompter contract concrete agents call from
+        // `execute()`. Consumers can rebind (`Ai::fake()`, an entirely
+        // different provider, an offline-mode stub) without touching the
+        // agent classes themselves.
+        $this->app->singleton( AgentPrompter::class, LaravelAiAgentPrompter::class );
 
         $this->app->singleton( CostEstimator::class, function ( $app ) {
             return new CostEstimator( $app->make( Repository::class ) );
@@ -174,6 +185,37 @@ class AiServiceProvider extends ServiceProvider
         $this->registerLivewireComponents();
         $this->registerAdminPages();
         $this->registerApiRoutes();
+    }
+
+    /**
+     * Cross-cutting agents that ship in the `artisanpack-ui/ai` package
+     * itself — consumed by `media-library`, `visual-editor`,
+     * `cms-framework`, `analytics`, and `security-analytics` rather than
+     * living in any single downstream package.
+     *
+     * Picked up by {@see discoverFeaturesFromProviders()} the same way
+     * every third-party package registers its own agents.
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, array{ agent: class-string, package: string }>
+     */
+    public function aiFeatures(): array
+    {
+        return [
+            'ai.alt_text'        => [
+                'agent'   => AltTextGenerationAgent::class,
+                'package' => 'artisanpack-ui/ai',
+            ],
+            'ai.content_rewrite' => [
+                'agent'   => ContentRewriteAgent::class,
+                'package' => 'artisanpack-ui/ai',
+            ],
+            'ai.summarize'       => [
+                'agent'   => SummarizationAgent::class,
+                'package' => 'artisanpack-ui/ai',
+            ],
+        ];
     }
 
     /**

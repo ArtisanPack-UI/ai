@@ -9,6 +9,7 @@ use Tests\Support\FakeAgent;
 
 beforeEach( function (): void {
     $this->createSettingsTable();
+    $this->clearFeatureRegistry();
 
     config()->set( 'artisanpack.ai.api.middleware', [ 'api', 'auth' ] );
 
