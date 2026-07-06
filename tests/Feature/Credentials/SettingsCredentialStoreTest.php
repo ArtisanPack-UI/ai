@@ -167,3 +167,23 @@ it( 'returns unavailable when the settings table is missing', function (): void 
     expect( $store->isAvailable() )->toBeFalse();
     expect( $store->load() )->toBeNull();
 } );
+
+it( 'loads Ollama credentials with an empty API key when a base URL is present', function (): void {
+    /** @var SettingsCredentialStore $store */
+    $store = app( SettingsCredentialStore::class );
+
+    $store->save( new Credentials(
+        provider: 'ollama',
+        apiKey: '',
+        defaultModel: 'llama3.2:3b',
+        baseUrl: 'http://127.0.0.1:11434',
+    ) );
+
+    $loaded = $store->load();
+
+    expect( $loaded )->toBeInstanceOf( Credentials::class );
+    expect( $loaded->provider )->toBe( 'ollama' );
+    expect( $loaded->apiKey )->toBe( '' );
+    expect( $loaded->baseUrl )->toBe( 'http://127.0.0.1:11434' );
+    expect( $loaded->defaultModel )->toBe( 'llama3.2:3b' );
+} );

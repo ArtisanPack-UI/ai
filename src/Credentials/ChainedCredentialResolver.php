@@ -164,6 +164,12 @@ class ChainedCredentialResolver implements CredentialResolver
     /**
      * Build credentials from env vars, applying per-feature overrides.
      *
+     * Ollama is a special case: the daemon runs locally and does not
+     * require an API key. We accept an empty `ARTISANPACK_AI_API_KEY`
+     * when the resolved provider is `ollama` as long as a base URL is
+     * available (env, config, or the provider's default in
+     * `providers.ollama.base_url`).
+     *
      * @since 1.0.0
      *
      * @param  string|null  $featureKey  Optional feature key for per-feature overrides.
@@ -175,12 +181,31 @@ class ChainedCredentialResolver implements CredentialResolver
         $provider = $this->envOrConfig( 'ARTISANPACK_AI_PROVIDER', 'artisanpack.ai.default' );
         $apiKey   = $this->envOrConfig( 'ARTISANPACK_AI_API_KEY', 'artisanpack.ai.api_key' );
 
-        if ( null === $provider || null === $apiKey || '' === $provider || '' === $apiKey ) {
+        if ( null === $provider || '' === $provider ) {
             return null;
         }
 
         $defaultModel = $this->envOrConfig( 'ARTISANPACK_AI_DEFAULT_MODEL', 'artisanpack.ai.default_model' );
         $baseUrl      = $this->envOrConfig( 'ARTISANPACK_AI_BASE_URL', 'artisanpack.ai.base_url' );
+
+        if ( 'ollama' === $provider ) {
+            // Fall back to the per-provider defaults so a fresh install with
+            // `ARTISANPACK_AI_PROVIDER=ollama` and nothing else set still
+            // resolves the built-in `http://127.0.0.1:11434` URL and model.
+            if ( null === $baseUrl || '' === $baseUrl ) {
+                $baseUrl = $this->providerConfigString( 'ollama', 'base_url' );
+            }
+
+            if ( null === $defaultModel || '' === $defaultModel ) {
+                $defaultModel = $this->providerConfigString( 'ollama', 'model' );
+            }
+
+            if ( null === $apiKey ) {
+                $apiKey = '';
+            }
+        } elseif ( null === $apiKey || '' === $apiKey ) {
+            return null;
+        }
 
         if ( null !== $featureKey ) {
             $slug             = strtoupper( str_replace( [ '.', '-' ], '_', $featureKey ) );
@@ -197,6 +222,28 @@ class ChainedCredentialResolver implements CredentialResolver
             defaultModel: $defaultModel,
             baseUrl: $baseUrl,
         );
+    }
+
+    /**
+     * Read a string value from `artisanpack.ai.providers.<provider>.<field>`,
+     * or null when unset / non-string.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $provider  Provider slug.
+     * @param  string  $field     Field key inside the provider config.
+     *
+     * @return string|null
+     */
+    protected function providerConfigString( string $provider, string $field ): ?string
+    {
+        $value = $this->config->get( 'artisanpack.ai.providers.' . $provider . '.' . $field );
+
+        if ( ! is_string( $value ) || '' === $value ) {
+            return null;
+        }
+
+        return $value;
     }
 
     /**

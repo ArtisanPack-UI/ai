@@ -5,6 +5,8 @@ declare( strict_types=1 );
 namespace Tests;
 
 use ArtisanPackUI\Ai\AiServiceProvider;
+use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\View;
 use Orchestra\Testbench\TestCase as BaseTestCase;
 
 /**
@@ -22,6 +24,30 @@ abstract class TestCase extends BaseTestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // The Livewire admin blade views reference `<x-artisanpack-*>`
+        // components that ship in `artisanpack-ui/livewire-ui-components`
+        // — not a hard dep of this package. Register minimal anonymous
+        // stubs so `Livewire::test()` can render without exploding on
+        // "component not found."
+        View::addNamespace( 'ai-test-stubs', __DIR__ . '/Support/views' );
+        Blade::anonymousComponentPath(
+            __DIR__ . '/Support/views/components',
+        );
+
+        // Real component ships @scope / @endscope directives from
+        // livewire-ui-components. Register no-op fallbacks so rendered
+        // views compile even without that package installed.
+        $directives = Blade::getCustomDirectives();
+
+        if ( ! isset( $directives['scope'] ) ) {
+            // Skip the body entirely — the real `@scope` block references
+            // per-row variables that don't exist outside livewire-ui-
+            // components' scope wrapper. Not running the body is enough
+            // for our tests: they assert on component state, not markup.
+            Blade::directive( 'scope', fn ( string $expression ): string => '<?php if ( false ): ?>' );
+            Blade::directive( 'endscope', fn (): string => '<?php endif; ?>' );
+        }
     }
 
     /**
@@ -43,6 +69,11 @@ abstract class TestCase extends BaseTestCase
     /**
      * Gets package providers.
      *
+     * Registers Livewire's service provider when livewire/livewire is
+     * installed so the Livewire admin components can be exercised under
+     * `Livewire\Livewire::test()`. Kept optional so the ai package continues
+     * to boot cleanly when Livewire is absent.
+     *
      * @since 1.0.0
      *
      * @param  \Illuminate\Foundation\Application  $app  The application instance.
@@ -51,9 +82,15 @@ abstract class TestCase extends BaseTestCase
      */
     protected function getPackageProviders( $app ): array
     {
-        return [
+        $providers = [
             AiServiceProvider::class,
         ];
+
+        if ( class_exists( \Livewire\LivewireServiceProvider::class ) ) {
+            array_unshift( $providers, \Livewire\LivewireServiceProvider::class );
+        }
+
+        return $providers;
     }
 
     /**

@@ -19,6 +19,7 @@ use ArtisanPackUI\Ai\Credentials\Credentials;
 use ArtisanPackUI\Ai\Events\AgentUsageRecorded;
 use ArtisanPackUI\Ai\Exceptions\FeatureDisabledException;
 use ArtisanPackUI\Ai\Exceptions\MissingCredentialsException;
+use ArtisanPackUI\Ai\Support\FeatureSettings;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
@@ -390,6 +391,50 @@ abstract class ArtisanPackAgent
     }
 
     /**
+     * Resolve the instructions the agent should use for its next run.
+     *
+     * Precedence:
+     *
+     *   1. Settings-backed override (`FeatureSettings::instructions()`) —
+     *      the "config layer that survives request boundaries" the RFC
+     *      calls for.
+     *   2. `artisanpack.ai.features.{key}.instructions` config value.
+     *   3. Class-level default returned by `instructions()`.
+     *
+     * `instructions()` remains part of the frozen v1.x public surface —
+     * subclasses continue to override it to define their default prompt.
+     * Executors that want the *effective* prompt should call this method
+     * instead of `instructions()` directly.
+     *
+     * @since 1.0.0
+     *
+     * @return string
+     */
+    public function resolvedInstructions(): string
+    {
+        /** @var Container $container */
+        $container = app();
+
+        $fromSettings = $this->featureSettingsValue( $container, 'instructions' );
+
+        if ( null !== $fromSettings ) {
+            return $fromSettings;
+        }
+
+        $featureConfig = $this->featureConfig( $container );
+
+        if (
+            isset( $featureConfig['instructions'] )
+            && is_string( $featureConfig['instructions'] )
+            && '' !== $featureConfig['instructions']
+        ) {
+            return $featureConfig['instructions'];
+        }
+
+        return $this->instructions();
+    }
+
+    /**
      * Emit a chunk through the registered stream callback, if any.
      *
      * Subclasses implementing streaming inside `execute()` should call this
@@ -471,8 +516,8 @@ abstract class ArtisanPackAgent
     }
 
     /**
-     * Resolve the model against runtime override → per-feature config →
-     * per-feature credentials → default.
+     * Resolve the model against runtime override → settings-backed override
+     * → per-feature config → per-feature credentials → class default.
      *
      * Reads the `artisanpack.ai.features` array with a literal-key lookup
      * so that dot-notation feature keys (e.g. `seo.suggest_meta_description`)
@@ -492,6 +537,12 @@ abstract class ArtisanPackAgent
             return $this->modelOverride;
         }
 
+        $fromSettings = $this->featureSettingsValue( $container, 'model' );
+
+        if ( null !== $fromSettings ) {
+            return $fromSettings;
+        }
+
         $featureConfig = $this->featureConfig( $container );
 
         if ( isset( $featureConfig['model'] ) && is_string( $featureConfig['model'] ) && '' !== $featureConfig['model'] ) {
@@ -503,6 +554,39 @@ abstract class ArtisanPackAgent
         }
 
         return $this->defaultModel;
+    }
+
+    /**
+     * Read a settings-backed override for the current feature.
+     *
+     * Returns null when no `FeatureSettings` binding is available, no feature
+     * key is set, or nothing is stored for the requested field.
+     *
+     * @since 1.0.0
+     *
+     * @param  Container  $container  Service container.
+     * @param  string     $field      `model` or `instructions`.
+     *
+     * @return string|null
+     */
+    protected function featureSettingsValue( Container $container, string $field ): ?string
+    {
+        if ( '' === $this->featureKey ) {
+            return null;
+        }
+
+        if ( ! $container->bound( FeatureSettings::class ) ) {
+            return null;
+        }
+
+        /** @var FeatureSettings $settings */
+        $settings = $container->make( FeatureSettings::class );
+
+        $value = 'model' === $field
+            ? $settings->model( $this->featureKey )
+            : $settings->instructions( $this->featureKey );
+
+        return null === $value || '' === $value ? null : $value;
     }
 
     /**

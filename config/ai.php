@@ -129,6 +129,18 @@ return [
             'gpt-4o-mini' => [ 'input_per_1k' => 0.00015, 'output_per_1k' => 0.0006 ],
         ],
 
+        // Ollama models run locally; there's no metered cost. We keep the
+        // rows here so the estimator's per-model $0 fallback isn't
+        // misinterpreted as "we forgot to price this model" — a zero here
+        // is deliberate.
+        'ollama' => [
+            'llama3.2:1b'  => [ 'input_per_1k' => 0.0, 'output_per_1k' => 0.0 ],
+            'llama3.2:3b'  => [ 'input_per_1k' => 0.0, 'output_per_1k' => 0.0 ],
+            'llama3.1:8b'  => [ 'input_per_1k' => 0.0, 'output_per_1k' => 0.0 ],
+            'llama3.1:70b' => [ 'input_per_1k' => 0.0, 'output_per_1k' => 0.0 ],
+            'qwen2.5:7b'   => [ 'input_per_1k' => 0.0, 'output_per_1k' => 0.0 ],
+        ],
+
     ],
 
     /*
@@ -155,6 +167,17 @@ return [
             'driver'  => 'openai',
             'api_key' => env( 'OPENAI_API_KEY' ),
             'model'   => env( 'OPENAI_MODEL' ),
+        ],
+
+        // Ollama is first-class in v1.0.0. It runs locally, so the API key
+        // is optional (empty is fine) and the base URL doubles as the
+        // "connection string." Defaults match Ollama's own install:
+        // `ollama serve` on http://127.0.0.1:11434.
+        'ollama' => [
+            'driver'   => 'ollama',
+            'api_key'  => env( 'OLLAMA_API_KEY', '' ),
+            'base_url' => env( 'OLLAMA_BASE_URL', 'http://127.0.0.1:11434' ),
+            'model'    => env( 'OLLAMA_MODEL', 'llama3.2:3b' ),
         ],
 
     ],

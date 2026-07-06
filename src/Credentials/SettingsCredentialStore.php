@@ -50,6 +50,19 @@ class SettingsCredentialStore
     public const KEY_PREFIX = 'ai_credentials.';
 
     /**
+     * Placeholder written when a credential row leaks through the generic
+     * SettingsManager write path.
+     *
+     * Real writes go through `save()` which encrypts. Anything else should
+     * be treated as "there was a key, we're not going to store it here."
+     *
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    public const REDACTED_MARKER = '__redacted__';
+
+    /**
      * Factory returning the current Encrypter.
      *
      * Stored as a factory rather than an instance so a runtime APP_KEY
@@ -113,7 +126,10 @@ class SettingsCredentialStore
      * Load stored credentials.
      *
      * Returns null when the `settings` table is unavailable, no provider is
-     * configured, or the stored API key cannot be decrypted.
+     * configured, or the stored API key cannot be decrypted. Ollama is a
+     * special case: it accepts empty API keys because the daemon runs
+     * locally. In that scenario the stored ciphertext row is optional and
+     * an empty decrypted string is valid.
      *
      * @since 1.0.0
      *
@@ -127,17 +143,27 @@ class SettingsCredentialStore
 
         $raw = $this->readRaw();
 
-        if ( null === $raw['provider'] || null === $raw['api_key'] ) {
+        if ( null === $raw['provider'] ) {
             return null;
         }
 
-        try {
-            $apiKey = $this->encrypter()->decryptString( $raw['api_key'] );
-        } catch ( DecryptException $exception ) {
-            return null;
+        $isOllama = 'ollama' === $raw['provider'];
+
+        if ( null === $raw['api_key'] ) {
+            if ( ! $isOllama ) {
+                return null;
+            }
+
+            $apiKey = '';
+        } else {
+            try {
+                $apiKey = $this->encrypter()->decryptString( $raw['api_key'] );
+            } catch ( DecryptException $exception ) {
+                return null;
+            }
         }
 
-        if ( '' === $apiKey ) {
+        if ( '' === $apiKey && ! $isOllama ) {
             return null;
         }
 

@@ -36,8 +36,14 @@
     "artisanpack-ui/code-style-pint": "^1.1",
     "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
     "laravel/pint": "^1.26",
+    "livewire/livewire": "^3.6",
     "orchestra/testbench": "^10.2|^11.0",
     "friendsofphp/php-cs-fixer": "^3.75"
+  },
+  "suggest": {
+    "artisanpack-ui/cms-framework": "Automatically registers AI credentials, features, budget and cache setting groups under the CMS admin surface.",
+    "artisanpack-ui/livewire-ui-components": "Renders the AI Settings and Usage admin surfaces using x-artisanpack-* components.",
+    "livewire/livewire": "Required to mount the AI Settings and Usage dashboard Livewire components under cms-framework's admin nav."
   },
   "scripts": {
     "lint": [
