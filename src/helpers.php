@@ -10,6 +10,22 @@
  */
 
 use ArtisanPackUI\Ai\Ai;
+use ArtisanPackUI\Ai\Support\BudgetSettings;
+
+if ( ! function_exists( 'apAiCurrentBudgetWarning' ) ) {
+    /**
+     * Return the current month's budget warning payload for the admin
+     * banner, or null when no warning is active.
+     *
+     * @since 1.0.0
+     *
+     * @return array{ month: string, spent_usd: float, cap_usd: float, threshold_percentage: float }|null
+     */
+    function apAiCurrentBudgetWarning(): ?array
+    {
+        return app( BudgetSettings::class )->currentBanner();
+    }
+}
 
 if ( ! function_exists( 'ai' ) ) {
     /**
