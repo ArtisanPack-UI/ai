@@ -89,6 +89,13 @@ class LaravelAiAgentPrompter implements AgentPrompter
                 sprintf( 'provider call failed: %s', $exception->getMessage() ),
                 $exception,
             );
+        } finally {
+            // Drop the runtime provider entry so long-running processes
+            // (Octane, queue workers) don't accumulate one config key + API
+            // key string per agent invocation. Config::set() with `null`
+            // does *not* remove — we have to reach into the underlying
+            // items array to actually free the memory.
+            $this->releaseRuntimeProvider( $providerName );
         }
 
         return [
@@ -96,6 +103,28 @@ class LaravelAiAgentPrompter implements AgentPrompter
             'input_tokens'  => $response->usage->promptTokens,
             'output_tokens' => $response->usage->completionTokens,
         ];
+    }
+
+    /**
+     * Free a runtime provider entry registered by {@see registerRuntimeProvider()}.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $name  Namespaced provider name.
+     *
+     * @return void
+     */
+    protected function releaseRuntimeProvider( string $name ): void
+    {
+        /** @var ConfigRepository $config */
+        $config = app( ConfigRepository::class );
+
+        $providers = $config->get( 'ai.providers', [] );
+
+        if ( is_array( $providers ) && array_key_exists( $name, $providers ) ) {
+            unset( $providers[ $name ] );
+            $config->set( 'ai.providers', $providers );
+        }
     }
 
     /**
@@ -313,8 +342,10 @@ class LaravelAiAgentPrompter implements AgentPrompter
      */
     protected function decodeOutput( AgentResponse $response ): array
     {
+        $payload = $this->stripCodeFence( $response->text );
+
         try {
-            $decoded = json_decode( $response->text, true, 512, JSON_THROW_ON_ERROR );
+            $decoded = json_decode( $payload, true, 512, JSON_THROW_ON_ERROR );
         } catch ( JsonException $exception ) {
             throw FeatureError::forFeature(
                 '(prompter)',
@@ -328,5 +359,39 @@ class LaravelAiAgentPrompter implements AgentPrompter
         }
 
         return $decoded;
+    }
+
+    /**
+     * Strip a leading/trailing markdown code fence off a model response.
+     *
+     * Anthropic's Haiku family occasionally emits structured output
+     * wrapped in ` ```json ... ``` ` even under `StructuredAnonymousAgent`.
+     * Rather than fail the whole call for a trivially recoverable payload,
+     * strip the fence when it's present and hand the raw JSON to the
+     * strict decoder. Plain JSON passes through unchanged.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $text  Raw response text from the provider.
+     *
+     * @return string
+     */
+    protected function stripCodeFence( string $text ): string
+    {
+        $trimmed = trim( $text );
+
+        if ( ! str_starts_with( $trimmed, '```' ) ) {
+            return $text;
+        }
+
+        // Drop the opening fence + optional language tag, then the trailing
+        // fence. Anything between them is the JSON payload.
+        $withoutOpen = (string) preg_replace( '/^```[A-Za-z0-9]*\s*\n?/', '', $trimmed );
+
+        if ( str_ends_with( $withoutOpen, '```' ) ) {
+            $withoutOpen = substr( $withoutOpen, 0, -3 );
+        }
+
+        return trim( $withoutOpen );
     }
 }

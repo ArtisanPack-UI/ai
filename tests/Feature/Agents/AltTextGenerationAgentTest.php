@@ -118,6 +118,17 @@ it( 'rejects non-image input types with a FeatureError', function (): void {
         ->toThrow( FeatureError::class, 'unsupported image source' );
 } );
 
+it( 'rejects the array form when source or value is blank', function (): void {
+    // The array form previously skipped the empty-string check because
+    // isset() succeeds on '' — the request would go out with a blank URL
+    // and the provider would return an HTTP-layer error.
+    expect( fn () => AltTextGenerationAgent::for( [ 'source' => 'url', 'value' => '' ] )->run() )
+        ->toThrow( FeatureError::class );
+
+    expect( fn () => AltTextGenerationAgent::for( [ 'source' => '', 'value' => 'https://x.jpg' ] )->run() )
+        ->toThrow( FeatureError::class );
+} );
+
 it( 'treats short unqualified filenames as paths, not base64', function (): void {
     // `favicon`, `logo.png`, and other bare filenames pass the "only
     // base64 chars" regex but must not be shipped to the model as

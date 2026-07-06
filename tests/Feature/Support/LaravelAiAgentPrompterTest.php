@@ -193,6 +193,36 @@ it( 'omits blank credential fields from the registered provider config', functio
     expect( $registered )->toBe( [ 'driver' => 'ollama' ] );
 } );
 
+it( 'releases the runtime provider config back off the Config repository', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    $name = invoke_prompter( $prompter, 'registerRuntimeProvider', new Credentials(
+        provider: 'anthropic',
+        apiKey: 'sk-leak-test',
+        defaultModel: 'claude-haiku-4-5',
+    ) );
+
+    expect( config( 'ai.providers.' . $name ) )->not->toBeNull();
+
+    invoke_prompter( $prompter, 'releaseRuntimeProvider', $name );
+
+    // The provider entry itself is gone. Under Octane / queue this
+    // prevents a slow leak of API-key strings into the Config array.
+    expect( config( 'ai.providers.' . $name ) )->toBeNull();
+} );
+
+it( 'strips a fenced JSON payload before decoding so a chatty model does not fail the run', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    $stripped = invoke_prompter( $prompter, 'stripCodeFence', "```json\n{\"alt_text\":\"cat\"}\n```" );
+    $withLang = invoke_prompter( $prompter, 'stripCodeFence', "```\n{\"x\":1}\n```" );
+    $bare     = invoke_prompter( $prompter, 'stripCodeFence', '{"x":1}' );
+
+    expect( $stripped )->toBe( '{"alt_text":"cat"}' );
+    expect( $withLang )->toBe( '{"x":1}' );
+    expect( $bare )->toBe( '{"x":1}' );
+} );
+
 it( 'sanitises a hostile provider driver so the config key stays a safe identifier', function (): void {
     $prompter = new LaravelAiAgentPrompter();
 

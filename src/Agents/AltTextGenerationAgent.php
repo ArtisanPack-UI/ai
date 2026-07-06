@@ -157,9 +157,16 @@ PROMPT;
      */
     protected function normalizeImageReference( mixed $input ): array
     {
-        if ( is_array( $input ) && isset( $input['source'], $input['value'] ) ) {
-            $source = (string) $input['source'];
-            $value  = (string) $input['value'];
+        if (
+            is_array( $input )
+            && isset( $input['source'], $input['value'] )
+            && is_string( $input['source'] )
+            && is_string( $input['value'] )
+            && '' !== $input['source']
+            && '' !== $input['value']
+        ) {
+            $source = $input['source'];
+            $value  = $input['value'];
         } elseif ( is_string( $input ) && '' !== $input ) {
             $source = $this->detectSource( $input );
             $value  = $input;
