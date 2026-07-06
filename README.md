@@ -6,21 +6,32 @@ Built on top of [`laravel/ai`](https://github.com/laravel/ai).
 
 See the [AI RFC](https://github.com/ArtisanPack-UI/.github/discussions/8) for design context and the roadmap for downstream feature work.
 
+## What this package gives you
+
+- A **feature registry** — every AI capability across the ecosystem discoverable in one place, with per-feature enable/disable toggles that survive across processes.
+- A **credential store** — bring your own key via `.env` or the admin UI, encrypted at rest, resolved through a single `CredentialResolver` contract.
+- A **cost + usage layer** — per-agent event stream, monthly budget cap, dashboard aggregations, budget-warning email.
+- A **provider-agnostic agent base class** — subclass, declare a feature key + output schema, get caching, telemetry, and streaming for free.
+- **Livewire admin surfaces** — Settings page, Usage dashboard, Per-feature toggles page.
+- **JSON API endpoints** — REST parity for React and Vue starter kits (see [docs/api-schema.json](docs/api-schema.json)).
+- **Ollama support** — every shipped agent works against a self-hosted local model, not just the cloud providers.
+
 ## Installation
 
 ```bash
 composer require artisanpack-ui/ai
+php artisan migrate
 ```
 
-Publish the config:
+Publish the config if you want to customise defaults:
 
 ```bash
 php artisan vendor:publish --tag=artisanpack-package-config
 ```
 
-## Usage
+## Quick start
 
-Access the shared AI foundation via the facade or helper:
+Access the shared foundation via the facade or helper:
 
 ```php
 use ArtisanPackUI\Ai\Facades\Ai;
@@ -30,6 +41,53 @@ Ai::/* ... */;
 // or
 ai()->/* ... */;
 ```
+
+Run an agent shipped by any ecosystem package (this example uses `artisanpack-ui/seo`):
+
+```php
+use ArtisanPackUI\Seo\Agents\MetaDescriptionAgent;
+
+$suggestion = MetaDescriptionAgent::for( [
+    'title' => $post->title,
+    'body'  => $post->summary_or_body,
+] )->run();
+
+$post->update( [ 'meta_description' => $suggestion['meta_description'] ] );
+```
+
+That single call runs the full pipeline: feature-gate check → credential resolution → cache lookup → provider call → telemetry event → cache store. There's no separate setup on the calling side.
+
+## Documentation
+
+- **[Authoring agents](docs/authoring-agents.md)** — how a downstream package adds a new AI capability, worked through with `MetaDescriptionAgent` as the running example.
+- **[Bring your own key (BYOK)](docs/byok.md)** — env-mode vs. CMS-mode setup, provider-specific notes for Anthropic, OpenAI, Gemini, Groq, and Ollama.
+- **[Overriding](docs/overriding.md)** — container binding and config override patterns for replacing a shipped agent with your own subclass.
+- **[JSON API schema](docs/api-schema.json)** — OpenAPI 3.1 schema for the REST endpoints that back the React and Vue admin surfaces.
+
+## Admin surfaces
+
+Once cms-framework is installed and migrations are run, the following surfaces register automatically under `Admin → Packages → AI`:
+
+- **Settings** — provider, encrypted API key, base URL (for Ollama), default model, per-feature overrides.
+- **Usage** — token totals, per-feature cost breakdown, daily buckets, drilldown to individual events.
+- **Features** — every registered agent listed and grouped by owning package, with an on/off toggle per feature.
+
+Each page is capability-gated on `manage_ai_settings`. cms-framework wires the capability; other stacks must define it themselves.
+
+## JSON API
+
+The React and Vue starter kits consume the same data through REST endpoints so they don't have to depend on Livewire. All endpoints are Sanctum-authenticated by default and gated on the same `manage_ai_settings` ability.
+
+| Method | Path                                                | Purpose                             |
+|--------|-----------------------------------------------------|-------------------------------------|
+| GET    | `/api/artisanpack-ai/settings`                      | Read current settings (no plaintext key) |
+| PUT    | `/api/artisanpack-ai/settings`                      | Update credentials + overrides      |
+| GET    | `/api/artisanpack-ai/features`                      | List registered features            |
+| POST   | `/api/artisanpack-ai/features/{key}/toggle`         | Enable or disable a feature         |
+| GET    | `/api/artisanpack-ai/usage?from=…&to=…`             | Aggregations for the dashboard      |
+| POST   | `/api/artisanpack-ai/test-connection`               | Probe the provider without saving   |
+
+Customise the prefix, middleware, and ability via `config('artisanpack.ai.api')`. Full schema in [docs/api-schema.json](docs/api-schema.json).
 
 ## Local models (Ollama)
 

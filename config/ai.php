@@ -209,4 +209,28 @@ return [
 
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | JSON API
+    |--------------------------------------------------------------------------
+    |
+    | REST/JSON endpoints backing the React and Vue admin surfaces. Disabled
+    | routes leave the surface Livewire-only. `middleware` is applied in
+    | order after Laravel's built-in `api` group is prepended, so the default
+    | stack authenticates via Sanctum and then runs the ability gate below.
+    | `ability` is checked against Laravel's Gate — undefined abilities deny
+    | by default, so downstream apps must register the ability (cms-framework
+    | does this automatically) before the endpoints become reachable.
+    |
+    */
+
+    'api' => [
+
+        'enabled'    => env( 'ARTISANPACK_AI_API_ENABLED', true ),
+        'prefix'     => env( 'ARTISANPACK_AI_API_PREFIX', 'api/artisanpack-ai' ),
+        'middleware' => [ 'api', 'auth:sanctum' ],
+        'ability'    => 'manage_ai_settings',
+
+    ],
+
 ];
