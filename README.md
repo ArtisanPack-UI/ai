@@ -89,6 +89,44 @@ The React and Vue starter kits consume the same data through REST endpoints so t
 
 Customise the prefix, middleware, and ability via `config('artisanpack.ai.api')`. Full schema in [docs/api-schema.json](docs/api-schema.json).
 
+### Drop-in React / Vue clients
+
+Both `@artisanpack-ui/react` and `@artisanpack-ui/vue` ship an `ai/` subpath that consumes these endpoints — `SettingsPage`, `UsageDashboard`, and `FeatureToggles` components plus a small `createAiApiClient` fetch wrapper.
+
+```tsx
+// React
+import { createAiApiClient, SettingsPage, UsageDashboard, FeatureToggles } from '@artisanpack-ui/react/ai';
+
+const client = createAiApiClient({
+  baseUrl: '/api/artisanpack-ai',
+  headers: { 'X-CSRF-TOKEN': csrfToken },
+});
+
+<SettingsPage client={client} heading="AI Settings" />
+<UsageDashboard client={client} refreshInterval={15_000} />
+<FeatureToggles client={client} heading="AI Features" />
+```
+
+```vue
+<!-- Vue -->
+<script setup lang="ts">
+import { createAiApiClient, SettingsPage, UsageDashboard, FeatureToggles } from '@artisanpack-ui/vue/ai';
+
+const client = createAiApiClient({
+  baseUrl: '/api/artisanpack-ai',
+  headers: { 'X-CSRF-TOKEN': csrfToken },
+});
+</script>
+
+<template>
+  <SettingsPage :client="client" heading="AI Settings" />
+  <UsageDashboard :client="client" :refresh-interval="15000" />
+  <FeatureToggles :client="client" heading="AI Features" />
+</template>
+```
+
+See [docs/react-vue-integration.md](docs/react-vue-integration.md) for authentication, custom fetch wrappers, and long-running agent-output streaming via `useStreamingText`.
+
 ## Local models (Ollama)
 
 Ollama is a first-class provider in v1.0.0. Every downstream package that ships an agent is expected to work against Ollama in addition to a cloud provider, so a self-hosted CMS can run without ever paying per-token fees.
