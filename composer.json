@@ -3,7 +3,7 @@
   "description": "Shared AI foundation for the ArtisanPack UI ecosystem, built on top of laravel/ai.",
   "type": "library",
   "license": "MIT",
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.0",
   "autoload": {
     "psr-4": {
       "ArtisanPackUI\\Ai\\": "src/"
