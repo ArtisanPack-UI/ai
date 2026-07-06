@@ -1,3 +1,7 @@
+---
+title: Built-in Agents
+---
+
 # Built-in agents
 
 The `artisanpack-ui/ai` package ships three cross-cutting agents that live here (rather than in any single downstream package) because two or more packages consume them:

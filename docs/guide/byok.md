@@ -1,3 +1,7 @@
+---
+title: Bring Your Own Key (BYOK)
+---
+
 # Bring your own key (BYOK)
 
 The AI package never ships credentials. Every deployment either wires its own via environment variables (env mode) or lets an administrator drop them into the admin UI (CMS mode). This doc covers both, plus the specifics of each supported provider.
@@ -94,7 +98,7 @@ Prompts for the new provider/key/model and updates the encrypted row in place. C
 
 - Install: <https://ollama.com/>
 - No API key. Set `ARTISANPACK_AI_OLLAMA_BASE_URL` (env mode) or fill in the Base URL field (CMS mode).
-- Recommended models: `llama3.2:1b`, `llama3.2:3b`, `qwen2.5:7b`. See the [README's local-models section](../README.md#local-models-ollama) for pull commands and per-agent recommendations.
+- Recommended models: `llama3.2:1b`, `llama3.2:3b`, `qwen2.5:7b`. See the [README's local-models section](../../README.md#local-models-ollama) for pull commands and per-agent recommendations.
 - Connection test: `GET {base_url}/api/tags`. Free and safe to hit on every save.
 
 ## Security posture

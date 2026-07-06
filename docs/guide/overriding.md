@@ -1,3 +1,7 @@
+---
+title: Overriding Agents
+---
+
 # Overriding agents
 
 Power users can replace any agent shipped by an ArtisanPack UI package by rebinding it in the Laravel service container. This is the intended extension point — the `ArtisanPackAgent::for()` factory resolves through the container, so a container binding transparently swaps the implementation without touching the calling site.

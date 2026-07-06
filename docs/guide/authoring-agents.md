@@ -1,3 +1,7 @@
+---
+title: Authoring Agents
+---
+
 # Authoring an agent
 
 An **agent** is a class that wraps a single AI capability — write a meta description, generate alt text, classify a support ticket — into a self-contained unit with a frozen contract. Every ArtisanPack UI package that ships an AI feature does it by shipping an agent.

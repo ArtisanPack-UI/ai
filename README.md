@@ -13,7 +13,7 @@ See the [AI RFC](https://github.com/ArtisanPack-UI/.github/discussions/8) for de
 - A **cost + usage layer** — per-agent event stream, monthly budget cap, dashboard aggregations, budget-warning email.
 - A **provider-agnostic agent base class** — subclass, declare a feature key + output schema, get caching, telemetry, and streaming for free.
 - **Livewire admin surfaces** — Settings page, Usage dashboard, Per-feature toggles page.
-- **JSON API endpoints** — REST parity for React and Vue starter kits (see [docs/api-schema.json](docs/api-schema.json)).
+- **JSON API endpoints** — REST parity for React and Vue starter kits (see [docs/reference/api-schema.json](docs/reference/api-schema.json)).
 - **Ollama support** — every shipped agent works against a self-hosted local model, not just the cloud providers.
 
 ## Installation
@@ -59,11 +59,15 @@ That single call runs the full pipeline: feature-gate check → credential resol
 
 ## Documentation
 
-- **[Authoring agents](docs/authoring-agents.md)** — how a downstream package adds a new AI capability, worked through with `MetaDescriptionAgent` as the running example.
-- **[Built-in agents](docs/built-in-agents.md)** — the cross-cutting agents shipped in this package itself (`AltTextGenerationAgent`, `ContentRewriteAgent`, `SummarizationAgent`) — inputs, output schemas, and consumer notes.
-- **[Bring your own key (BYOK)](docs/byok.md)** — env-mode vs. CMS-mode setup, provider-specific notes for Anthropic, OpenAI, Gemini, Groq, and Ollama.
-- **[Overriding](docs/overriding.md)** — container binding and config override patterns for replacing a shipped agent with your own subclass.
-- **[JSON API schema](docs/api-schema.json)** — OpenAPI 3.1 schema for the REST endpoints that back the React and Vue admin surfaces.
+Start at [docs/home.md](docs/home.md) for the full documentation index. Direct links:
+
+- **[Getting Started](docs/getting-started.md)** — install, publish config, and run your first agent.
+- **[Authoring agents](docs/guide/authoring-agents.md)** — how a downstream package adds a new AI capability, worked through with `MetaDescriptionAgent` as the running example.
+- **[Built-in agents](docs/reference/built-in-agents.md)** — the cross-cutting agents shipped in this package itself (`AltTextGenerationAgent`, `ContentRewriteAgent`, `SummarizationAgent`) — inputs, output schemas, and consumer notes.
+- **[Bring your own key (BYOK)](docs/guide/byok.md)** — env-mode vs. CMS-mode setup, provider-specific notes for Anthropic, OpenAI, Gemini, Groq, and Ollama.
+- **[Overriding](docs/guide/overriding.md)** — container binding and config override patterns for replacing a shipped agent with your own subclass.
+- **[React and Vue integration](docs/integration/react-vue-integration.md)** — authentication, base URLs, and streaming for JavaScript clients.
+- **[JSON API schema](docs/reference/api-schema.json)** — OpenAPI 3.1 schema for the REST endpoints that back the React and Vue admin surfaces.
 
 ## Admin surfaces
 
@@ -88,7 +92,7 @@ The React and Vue starter kits consume the same data through REST endpoints so t
 | GET    | `/api/artisanpack-ai/usage?from=…&to=…`             | Aggregations for the dashboard      |
 | POST   | `/api/artisanpack-ai/test-connection`               | Probe the provider without saving   |
 
-Customise the prefix, middleware, and ability via `config('artisanpack.ai.api')`. Full schema in [docs/api-schema.json](docs/api-schema.json).
+Customise the prefix, middleware, and ability via `config('artisanpack.ai.api')`. Full schema in [docs/reference/api-schema.json](docs/reference/api-schema.json).
 
 ### Drop-in React / Vue clients
 
@@ -126,7 +130,7 @@ const client = createAiApiClient({
 </template>
 ```
 
-See [docs/react-vue-integration.md](docs/react-vue-integration.md) for authentication, custom fetch wrappers, and long-running agent-output streaming via `useStreamingText`.
+See [docs/integration/react-vue-integration.md](docs/integration/react-vue-integration.md) for authentication, custom fetch wrappers, and long-running agent-output streaming via `useStreamingText`.
 
 ## Local models (Ollama)
 

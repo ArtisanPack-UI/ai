@@ -1,3 +1,7 @@
+---
+title: React and Vue Integration
+---
+
 # React and Vue integration
 
 The `artisanpack-ui/ai` JSON API is designed to be consumed by any JavaScript client. Both `@artisanpack-ui/react` and `@artisanpack-ui/vue` ship pre-built components — `SettingsPage`, `UsageDashboard`, and `FeatureToggles` — that call these endpoints directly.
@@ -145,7 +149,7 @@ The hook uses the browser Streams API + an `AbortController`, and aborts the in-
 
 ## Type-level parity with the API schema
 
-Both packages export TypeScript types that mirror the [OpenAPI schema](./api-schema.json):
+Both packages export TypeScript types that mirror the [OpenAPI schema](../reference/api-schema.json):
 
 - `AiSettingsResponse`, `AiSettingsUpdate`, `AiCredentials`, `AiFeatureOverride`
 - `AiFeature`
