@@ -50,7 +50,19 @@ If your app has its own HTTP layer — Axios, Ky, or a Sanctum-aware fetch wrapp
 
 ## Authentication
 
-All ai endpoints are Sanctum-authenticated by default and gated on the `manage_ai_settings` ability. When calling from a same-origin SPA that shares a session cookie with the Laravel app, the default `fetch` credentials of `same-origin` plus a CSRF header is enough.
+All ai endpoints are Sanctum-authenticated by default and gated on the `manage_ai_settings` ability. When calling from a **same-origin** SPA that shares a session cookie with the Laravel app, the default `fetch` credentials of `same-origin` plus a CSRF header is enough.
+
+If your SPA runs on a **different subdomain** than the Laravel app (the common Sanctum SPA layout), you need to opt into cross-origin credentials explicitly. Supply a `fetchImpl` that sets `credentials: 'include'` on every request:
+
+```ts
+const client = createAiApiClient({
+  baseUrl: 'https://api.example.com/artisanpack-ai',
+  fetchImpl: (input, init) => fetch(input, { ...init, credentials: 'include' }),
+  headers: { 'X-XSRF-TOKEN': readXsrfCookie() },
+});
+```
+
+Without `credentials: 'include'`, the browser drops the Sanctum session cookie on the cross-origin request and every call 401s.
 
 For token-based auth, add the bearer to `createAiApiClient` headers:
 
@@ -90,7 +102,9 @@ The `/usage` endpoint is cheap enough for a 15-second cadence (it aggregates fro
 
 ## Streaming long-running agent output
 
-For long-running agents (multi-second generations, chain-of-thought output, etc.) the ai package can stream chunks over a plain `fetch` response body. Both packages ship a `useStreamingText` hook/composable that consumes that stream:
+For long-running agents (multi-second generations, chain-of-thought output, etc.), both packages ship a `useStreamingText` hook/composable that consumes a plain `fetch` response body as a UTF-8 text stream.
+
+> **Note:** `useStreamingText` is a client-side consumer, not a wire protocol. This package's public REST surface (`/settings`, `/features`, `/usage`, `/test-connection`) does not include a streaming route — you point the hook at whatever URL your own app exposes (e.g. a custom controller that returns a `StreamedResponse`).
 
 ```tsx
 // React
@@ -115,11 +129,12 @@ function AgentOutput({ agentUrl }: { agentUrl: string }) {
 <script setup lang="ts">
 import { useStreamingText } from '@artisanpack-ui/vue/ai';
 
+const props = defineProps<{ agentUrl: string }>();
 const { text, streaming, error, start, stop } = useStreamingText();
 </script>
 
 <template>
-  <button :disabled="streaming" @click="start('/api/artisanpack-ai/agents/run')">Run</button>
+  <button :disabled="streaming" @click="start(props.agentUrl)">Run</button>
   <button :disabled="!streaming" @click="stop">Stop</button>
   <pre>{{ text }}<span v-if="streaming">…</span></pre>
   <span v-if="error" role="alert">{{ error.message }}</span>
