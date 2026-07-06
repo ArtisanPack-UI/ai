@@ -8,22 +8,32 @@
 --}}
 <div class="space-y-6">
     @if ( $toast )
+        @php
+            $toastColor = match ( $toast['type'] ) {
+                'success' => 'success',
+                'error'   => 'error',
+                default   => 'info',
+            };
+            $toastIcon = match ( $toast['type'] ) {
+                'success' => 'o-check-circle',
+                'error'   => 'o-exclamation-triangle',
+                default   => 'o-information-circle',
+            };
+        @endphp
+
         <x-artisanpack-alert
-            :type="$toast['type']"
+            :color="$toastColor"
+            :icon="$toastIcon"
             :title="$toast['message']"
             dismissible
             wire:key="ai-settings-toast-{{ md5( $toast['message'] ) }}"
         />
     @endif
 
-    <x-artisanpack-card>
-        <x-slot:header>
-            <h2 class="text-lg font-semibold">{{ __( 'Provider credentials' ) }}</h2>
-            <p class="text-sm opacity-70">
-                {{ __( 'Choose a provider, drop in credentials, and verify the connection before saving.' ) }}
-            </p>
-        </x-slot:header>
-
+    <x-artisanpack-card
+        :title="__( 'Provider credentials' )"
+        :subtitle="__( 'Choose a provider, drop in credentials, and verify the connection before saving.' )"
+    >
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
             <x-artisanpack-select
                 :label="__( 'Provider' )"
@@ -70,39 +80,33 @@
             />
         </div>
 
-        <x-slot:footer>
-            <div class="flex flex-wrap gap-2">
-                <x-artisanpack-button
-                    color="primary"
-                    wire:click="save"
-                    wire:loading.attr="disabled"
-                    icon="o-check"
-                >
-                    <span wire:loading.remove wire:target="save">{{ __( 'Save settings' ) }}</span>
-                    <span wire:loading wire:target="save">{{ __( 'Saving…' ) }}</span>
-                </x-artisanpack-button>
+        <x-slot:actions>
+            <x-artisanpack-button
+                wire:click="testConnection"
+                wire:loading.attr="disabled"
+                icon="o-signal"
+            >
+                <span wire:loading.remove wire:target="testConnection">{{ __( 'Test connection' ) }}</span>
+                <span wire:loading wire:target="testConnection">{{ __( 'Testing…' ) }}</span>
+            </x-artisanpack-button>
 
-                <x-artisanpack-button
-                    wire:click="testConnection"
-                    wire:loading.attr="disabled"
-                    icon="o-signal"
-                >
-                    <span wire:loading.remove wire:target="testConnection">{{ __( 'Test connection' ) }}</span>
-                    <span wire:loading wire:target="testConnection">{{ __( 'Testing…' ) }}</span>
-                </x-artisanpack-button>
-            </div>
-        </x-slot:footer>
+            <x-artisanpack-button
+                color="primary"
+                wire:click="save"
+                wire:loading.attr="disabled"
+                icon="o-check"
+            >
+                <span wire:loading.remove wire:target="save">{{ __( 'Save settings' ) }}</span>
+                <span wire:loading wire:target="save">{{ __( 'Saving…' ) }}</span>
+            </x-artisanpack-button>
+        </x-slot:actions>
     </x-artisanpack-card>
 
     @if ( ! empty( $features ) )
-        <x-artisanpack-card>
-            <x-slot:header>
-                <h2 class="text-lg font-semibold">{{ __( 'Per-feature overrides (advanced)' ) }}</h2>
-                <p class="text-sm opacity-70">
-                    {{ __( 'Pin a different model or prompt for specific agents. Leaves the class defaults in place when blank.' ) }}
-                </p>
-            </x-slot:header>
-
+        <x-artisanpack-card
+            :title="__( 'Per-feature overrides (advanced)' )"
+            :subtitle="__( 'Pin a different model or prompt for specific agents. Leaves the class defaults in place when blank.' )"
+        >
             <div class="space-y-4">
                 @foreach ( $features as $feature )
                     @php

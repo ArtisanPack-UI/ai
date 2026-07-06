@@ -1,13 +1,23 @@
-@extends( 'cms-framework::admin.layouts.app' )
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ __( 'AI' ) }}</title>
+    @vite( [ 'resources/css/app.css', 'resources/js/app.js' ] )
+</head>
+<body class="bg-base-200 min-h-screen">
+    <div class="container mx-auto max-w-3xl space-y-4 p-6">
+        <nav class="text-sm opacity-70">
+            <a href="{{ url( '/admin/dashboard' ) }}" class="link">{{ __( 'Admin' ) }}</a>
+            &rsaquo;
+            <span>{{ __( 'AI' ) }}</span>
+        </nav>
 
-@section( 'title', __( 'AI' ) )
-
-@section( 'content' )
-    <div class="space-y-4 p-6">
         <h1 class="text-2xl font-bold">{{ __( 'AI' ) }}</h1>
 
         <p class="opacity-80">
-            {{ __( 'Configure the shared AI foundation and inspect usage. Pick a section from the sub-menu.' ) }}
+            {{ __( 'Configure the shared AI foundation and inspect usage. Pick a section from below.' ) }}
         </p>
 
         <ul class="list-disc space-y-1 pl-6">
@@ -23,4 +33,5 @@
             </li>
         </ul>
     </div>
-@endsection
+</body>
+</html>

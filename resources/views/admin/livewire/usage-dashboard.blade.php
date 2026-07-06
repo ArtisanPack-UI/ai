@@ -6,11 +6,7 @@
   into individual event rows. Uses `x-artisanpack-*` components throughout.
 --}}
 <div class="space-y-6">
-    <x-artisanpack-card>
-        <x-slot:header>
-            <h2 class="text-lg font-semibold">{{ __( 'Range' ) }}</h2>
-        </x-slot:header>
-
+    <x-artisanpack-card :title="__( 'Range' )">
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
             <x-artisanpack-input
                 :label="__( 'From' )"
@@ -64,41 +60,37 @@
         </div>
 
         @php
-            $daily = $this->daily;
-            $chart = [
-                'type' => 'bar',
-                'data' => [
-                    'labels'   => array_map( fn ( $row ) => $row['bucket'], $daily ),
-                    'datasets' => [
-                        [
-                            'label' => (string) __( 'Cost (USD)' ),
-                            'data'  => array_map( fn ( $row ) => $row['cost_usd'], $daily ),
-                        ],
-                        [
-                            'label' => (string) __( 'Requests' ),
-                            'data'  => array_map( fn ( $row ) => $row['events'], $daily ),
-                        ],
-                    ],
+            $daily        = $this->daily;
+            $chartLabels  = array_map( fn ( $row ) => $row['bucket'], $daily );
+            $chartOptions = [
+                'chart'   => [ 'toolbar' => [ 'show' => false ] ],
+                'xaxis'   => [ 'categories' => $chartLabels ],
+                'stroke'  => [ 'curve' => 'smooth', 'width' => 2 ],
+                'legend'  => [ 'position' => 'top' ],
+                'dataLabels' => [ 'enabled' => false ],
+            ];
+            $chartSeries = [
+                [
+                    'name' => (string) __( 'Cost (USD)' ),
+                    'data' => array_map( fn ( $row ) => (float) $row['cost_usd'], $daily ),
+                ],
+                [
+                    'name' => (string) __( 'Requests' ),
+                    'data' => array_map( fn ( $row ) => (int) $row['events'], $daily ),
                 ],
             ];
         @endphp
 
-        <x-artisanpack-card>
-            <x-slot:header>
-                <h2 class="text-lg font-semibold">{{ __( 'Daily activity' ) }}</h2>
-            </x-slot:header>
-
+        <x-artisanpack-card :title="__( 'Daily activity' )">
             <x-artisanpack-chart
-                :config="$chart"
+                :options="$chartOptions"
+                :series="$chartSeries"
+                type="bar"
                 wire:key="usage-daily-chart-{{ md5( $from . '|' . $to ) }}"
             />
         </x-artisanpack-card>
 
-        <x-artisanpack-card>
-            <x-slot:header>
-                <h2 class="text-lg font-semibold">{{ __( 'Per-feature breakdown' ) }}</h2>
-            </x-slot:header>
-
+        <x-artisanpack-card :title="__( 'Per-feature breakdown' )">
             <x-artisanpack-table
                 :headers="[
                     [ 'key' => 'feature_key',   'label' => __( 'Feature' ) ],
@@ -127,21 +119,16 @@
         </x-artisanpack-card>
 
         @if ( $drilldownFeature )
-            <x-artisanpack-card>
-                <x-slot:header>
-                    <div class="flex items-center justify-between">
-                        <h2 class="text-lg font-semibold">
-                            {{ __( 'Recent runs for :feature', [ 'feature' => $drilldownFeature ] ) }}
-                        </h2>
-                        <x-artisanpack-button
-                            size="sm"
-                            wire:click="closeDrilldown"
-                            icon="o-x-mark"
-                        >
-                            {{ __( 'Close' ) }}
-                        </x-artisanpack-button>
-                    </div>
-                </x-slot:header>
+            <x-artisanpack-card :title="__( 'Recent runs for :feature', [ 'feature' => $drilldownFeature ] )">
+                <x-slot:actions>
+                    <x-artisanpack-button
+                        size="sm"
+                        wire:click="closeDrilldown"
+                        icon="o-x-mark"
+                    >
+                        {{ __( 'Close' ) }}
+                    </x-artisanpack-button>
+                </x-slot:actions>
 
                 <x-artisanpack-table
                     :headers="[
