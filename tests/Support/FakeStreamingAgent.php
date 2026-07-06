@@ -88,12 +88,13 @@ class FakeStreamingAgent extends ArtisanPackAgent
      *
      * @since 1.0.0
      *
-     * @param  Credentials  $credentials  Resolved credentials.
-     * @param  string       $model        Resolved model identifier.
+     * @param  Credentials  $credentials   Resolved credentials.
+     * @param  string       $model         Resolved model identifier.
+     * @param  string       $instructions  Resolved system prompt.
      *
      * @return array{ output: array<string, mixed>, input_tokens: int, output_tokens: int }
      */
-    protected function execute( Credentials $credentials, string $model ): array
+    protected function execute( Credentials $credentials, string $model, string $instructions ): array
     {
         $input       = (string) $this->input();
         $accumulated = '';

@@ -102,26 +102,32 @@
         </x-slot:actions>
     </x-artisanpack-card>
 
-    @if ( ! empty( $features ) )
+    @if ( ! empty( $featureOverrides ) )
         <x-artisanpack-card
             :title="__( 'Per-feature overrides (advanced)' )"
             :subtitle="__( 'Pin a different model or prompt for specific agents. Leaves the class defaults in place when blank.' )"
         >
             <div class="space-y-4">
-                @foreach ( $features as $feature )
+                {{-- Index by loop position, not feature key. Feature keys are
+                     dot-separated (e.g. `seo.suggest_meta_description`) and
+                     Livewire treats every `.` in a wire:model path as a
+                     nested segment, so a key-indexed binding silently mis-
+                     nests the write and the override is dropped on save. --}}
+                @foreach ( $featureOverrides as $index => $override )
                     @php
-                        $key             = $feature['key'];
-                        $modelValue      = $featureOverrides[ $key ]['model'] ?? '';
-                        $instructionsVal = $featureOverrides[ $key ]['instructions'] ?? '';
+                        $featureKey    = $override['feature_key'] ?? '';
+                        $featureMeta   = collect( $features )->firstWhere( 'key', $featureKey ) ?? [];
+                        $packageLabel  = $featureMeta['package'] ?? '';
+                        $defaultModel  = $featureMeta['default_model'] ?? '';
                     @endphp
 
-                    <div wire:key="feature-override-{{ $key }}" class="rounded border border-base-300 p-4">
+                    <div wire:key="feature-override-{{ $index }}" class="rounded border border-base-300 p-4">
                         <div class="mb-2 flex items-center justify-between">
                             <div>
-                                <p class="font-semibold">{{ $key }}</p>
+                                <p class="font-semibold">{{ $featureKey }}</p>
                                 <p class="text-xs opacity-70">
-                                    {{ $feature['package'] }}
-                                    · {{ __( 'default model' ) }}: <code>{{ $feature['default_model'] }}</code>
+                                    {{ $packageLabel }}
+                                    · {{ __( 'default model' ) }}: <code>{{ $defaultModel }}</code>
                                 </p>
                             </div>
                         </div>
@@ -129,12 +135,12 @@
                         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <x-artisanpack-input
                                 :label="__( 'Model override' )"
-                                wire:model="featureOverrides.{{ $key }}.model"
+                                wire:model="featureOverrides.{{ $index }}.model"
                                 :placeholder="__( 'Leave blank to inherit the default.' )"
                             />
                             <x-artisanpack-textarea
                                 :label="__( 'Instructions override' )"
-                                wire:model="featureOverrides.{{ $key }}.instructions"
+                                wire:model="featureOverrides.{{ $index }}.instructions"
                                 :placeholder="__( 'Leave blank to inherit the class default prompt.' )"
                                 rows="4"
                             />

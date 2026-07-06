@@ -132,3 +132,13 @@ it( 'resets the drilldown when the range changes', function (): void {
         ->set( 'from', '2026-07-01' )
         ->assertSet( 'drilldownFeature', null );
 } );
+
+it( 'does not 500 when the wire-model date field receives a partial/garbage value', function (): void {
+    // A crafted Livewire payload (or an odd browser type=\"date\" fallback)
+    // sends "2026-0" as the intermediate value on the way to a full date.
+    // Without a guard, Carbon::parse throws and the whole dashboard 500s.
+    Livewire::test( UsageDashboard::class )
+        ->set( 'from', '2026-0' )
+        ->set( 'to', 'banana' )
+        ->assertHasNoErrors();
+} );

@@ -70,16 +70,23 @@ final class ConnectionTester
                 'openai'    => $this->testOpenai( $credentials ),
                 default     => [
                     'result'  => self::RESULT_UNSUPPORTED,
-                    'message' => sprintf(
-                        'Connection tests are not implemented for provider "%s"; credentials will still be saved.',
-                        $credentials->provider,
+                    'message' => (string) __(
+                        'Connection tests are not implemented for provider ":provider"; credentials will still be saved.',
+                        [ 'provider' => $credentials->provider ],
                     ),
                 ],
             };
         } catch ( Throwable $exception ) {
+            // Deliberately do NOT surface `$exception->getMessage()` — cloud
+            // provider errors sometimes echo request headers or response
+            // bodies, and a hostile Ollama daemon could return arbitrary
+            // text. Return a generic error and log the raw exception for
+            // the operator to inspect.
+            report( $exception );
+
             return [
                 'result'  => self::RESULT_ERROR,
-                'message' => $exception->getMessage(),
+                'message' => (string) __( 'Connection failed. Check the application log for details.' ),
             ];
         }
     }
@@ -95,12 +102,21 @@ final class ConnectionTester
      */
     protected function testOllama( Credentials $credentials ): array
     {
-        $baseUrl = $credentials->baseUrl;
+        $baseUrl = null === $credentials->baseUrl ? '' : trim( $credentials->baseUrl );
 
-        if ( null === $baseUrl || '' === $baseUrl ) {
+        if ( '' === $baseUrl ) {
             return [
                 'result'  => self::RESULT_MISSING_BASE_URL,
-                'message' => 'Ollama requires a base URL (default: http://127.0.0.1:11434).',
+                'message' => (string) __( 'Ollama requires a base URL (default: http://127.0.0.1:11434).' ),
+            ];
+        }
+
+        $validationError = $this->validateOllamaUrl( $baseUrl );
+
+        if ( null !== $validationError ) {
+            return [
+                'result'  => self::RESULT_ERROR,
+                'message' => $validationError,
             ];
         }
 
@@ -109,18 +125,66 @@ final class ConnectionTester
         if ( $response->successful() ) {
             return [
                 'result'  => self::RESULT_OK,
-                'message' => 'Connected to Ollama daemon at ' . $baseUrl . '.',
+                'message' => (string) __( 'Connected to Ollama daemon at :url.', [ 'url' => $baseUrl ] ),
             ];
         }
 
         return [
             'result'  => self::RESULT_ERROR,
-            'message' => sprintf(
-                'Ollama daemon at %s returned HTTP %d.',
-                $baseUrl,
-                $response->status(),
+            'message' => (string) __(
+                'Ollama daemon at :url returned HTTP :status.',
+                [ 'url' => $baseUrl, 'status' => $response->status() ],
             ),
         ];
+    }
+
+    /**
+     * Validate a user-supplied Ollama base URL against a minimal safety list.
+     *
+     * The runtime Ollama transport reuses whatever base URL is stored, so an
+     * admin who can save credentials also picks the destination. Without a
+     * safety net that's an SSRF primitive against internal services and
+     * cloud-metadata endpoints. This method enforces the smallest useful
+     * allow-list: `http` or `https` scheme, no cloud-metadata IP, and any
+     * unresolvable host is rejected as invalid rather than sent as-is.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $baseUrl  Trimmed base URL.
+     *
+     * @return string|null Error message, or null when the URL passes.
+     */
+    protected function validateOllamaUrl( string $baseUrl ): ?string
+    {
+        $parts = parse_url( $baseUrl );
+
+        if ( false === $parts || ! is_array( $parts ) || ! isset( $parts['scheme'], $parts['host'] ) ) {
+            return (string) __( 'Base URL must include a scheme and host (e.g. http://127.0.0.1:11434).' );
+        }
+
+        $scheme = strtolower( (string) $parts['scheme'] );
+
+        if ( 'http' !== $scheme && 'https' !== $scheme ) {
+            return (string) __( 'Base URL scheme must be http or https.' );
+        }
+
+        $host = strtolower( (string) $parts['host'] );
+
+        // Block cloud instance-metadata endpoints outright — AWS, Azure and
+        // GCP all publish credentials via the 169.254.169.254 link-local
+        // address, and Alibaba/Oracle use IMDS aliases at the same range.
+        if ( str_starts_with( $host, '169.254.' ) ) {
+            return (string) __( 'Base URL host is not allowed (cloud metadata range).' );
+        }
+
+        // metadata.google.internal + AWS/Azure DNS aliases.
+        $blockedHosts = [ 'metadata.google.internal', 'metadata', 'instance-data' ];
+
+        if ( in_array( $host, $blockedHosts, true ) ) {
+            return (string) __( 'Base URL host is not allowed (cloud metadata alias).' );
+        }
+
+        return null;
     }
 
     /**
@@ -137,7 +201,7 @@ final class ConnectionTester
         if ( '' === $credentials->apiKey ) {
             return [
                 'result'  => self::RESULT_MISSING_KEY,
-                'message' => 'Anthropic requires an API key.',
+                'message' => (string) __( 'Anthropic requires an API key.' ),
             ];
         }
 
@@ -165,7 +229,7 @@ final class ConnectionTester
         if ( '' === $credentials->apiKey ) {
             return [
                 'result'  => self::RESULT_MISSING_KEY,
-                'message' => 'OpenAI requires an API key.',
+                'message' => (string) __( 'OpenAI requires an API key.' ),
             ];
         }
 
@@ -192,13 +256,16 @@ final class ConnectionTester
         if ( $successful ) {
             return [
                 'result'  => self::RESULT_OK,
-                'message' => sprintf( 'Authenticated against %s.', $vendor ),
+                'message' => (string) __( 'Authenticated against :vendor.', [ 'vendor' => $vendor ] ),
             ];
         }
 
         return [
             'result'  => self::RESULT_ERROR,
-            'message' => sprintf( '%s returned HTTP %d.', $vendor, $status ),
+            'message' => (string) __(
+                ':vendor returned HTTP :status.',
+                [ 'vendor' => $vendor, 'status' => $status ],
+            ),
         ];
     }
 }

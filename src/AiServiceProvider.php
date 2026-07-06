@@ -228,7 +228,7 @@ class AiServiceProvider extends ServiceProvider
                 'action'     => fn () => view( 'artisanpack-ai::admin.pages.landing' ),
                 'icon'       => 'o-sparkles',
                 'order'      => 20,
-                'capability' => null,
+                'capability' => 'manage_ai_settings',
             ],
         );
 
@@ -240,7 +240,7 @@ class AiServiceProvider extends ServiceProvider
                 'action'     => fn () => view( 'artisanpack-ai::admin.pages.settings' ),
                 'icon'       => 'o-cog-6-tooth',
                 'order'      => 1,
-                'capability' => null,
+                'capability' => 'manage_ai_settings',
             ],
         );
 
@@ -252,7 +252,7 @@ class AiServiceProvider extends ServiceProvider
                 'action'     => fn () => view( 'artisanpack-ai::admin.pages.usage' ),
                 'icon'       => 'o-chart-bar',
                 'order'      => 2,
-                'capability' => null,
+                'capability' => 'manage_ai_settings',
             ],
         );
     }

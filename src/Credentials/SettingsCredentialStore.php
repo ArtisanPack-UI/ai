@@ -50,19 +50,6 @@ class SettingsCredentialStore
     public const KEY_PREFIX = 'ai_credentials.';
 
     /**
-     * Placeholder written when a credential row leaks through the generic
-     * SettingsManager write path.
-     *
-     * Real writes go through `save()` which encrypts. Anything else should
-     * be treated as "there was a key, we're not going to store it here."
-     *
-     * @since 1.0.0
-     *
-     * @var string
-     */
-    public const REDACTED_MARKER = '__redacted__';
-
-    /**
      * Factory returning the current Encrypter.
      *
      * Stored as a factory rather than an instance so a runtime APP_KEY
@@ -120,6 +107,24 @@ class SettingsCredentialStore
         }
 
         return $this->tableExists;
+    }
+
+    /**
+     * Reset the memoised `settings` table probe.
+     *
+     * Matches the invalidation hook `BudgetSettings` and `FeatureSettings`
+     * already expose so a worker that boots before migrations complete (or
+     * a tenant onboarding that creates the table mid-request) can force a
+     * fresh probe on its next read. Automatically invoked by `write()` so
+     * a successful save re-arms the probe for readers.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function resetSettingsTableProbe(): void
+    {
+        $this->tableExists = null;
     }
 
     /**
@@ -190,7 +195,18 @@ class SettingsCredentialStore
     public function save( Credentials $credentials ): void
     {
         $this->write( 'provider', $credentials->provider );
-        $this->write( 'api_key', $this->encrypter()->encryptString( $credentials->apiKey ) );
+
+        // Storing `encryptString('')` produces a non-empty ciphertext, which
+        // then makes `toPublicArray()['api_key_present']` return true — the
+        // admin UI would report "a key is stored" for a provider that has
+        // no meaningful key (e.g. Ollama). Delete the row when the plaintext
+        // is empty so the "present" signal only fires for real keys.
+        if ( '' === $credentials->apiKey ) {
+            $this->write( 'api_key', null );
+        } else {
+            $this->write( 'api_key', $this->encrypter()->encryptString( $credentials->apiKey ) );
+        }
+
         $this->write( 'default_model', $credentials->defaultModel );
         $this->write( 'base_url', $credentials->baseUrl );
     }
@@ -330,6 +346,11 @@ class SettingsCredentialStore
      */
     protected function write( string $field, ?string $value ): void
     {
+        // Any successful reach into the settings table means the table
+        // exists; refresh the memo so a probe cached before the migration
+        // ran doesn't strand this instance in "table missing" mode.
+        $this->tableExists = null;
+
         $key = self::KEY_PREFIX . $field;
 
         if ( null === $value ) {

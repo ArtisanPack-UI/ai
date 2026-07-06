@@ -349,7 +349,8 @@ abstract class ArtisanPackAgent
             throw MissingCredentialsException::forFeature( $this->featureKey );
         }
 
-        $model = $this->resolveModel( $container, $credentials );
+        $model        = $this->resolveModel( $container, $credentials );
+        $instructions = $this->resolvedInstructions();
 
         // Only skip cache when the caller is actively consuming a stream
         // (has registered a chunk callback). A $stream=true agent invoked
@@ -372,7 +373,7 @@ abstract class ArtisanPackAgent
             }
         }
 
-        $result = $this->execute( $credentials, $model );
+        $result = $this->execute( $credentials, $model, $instructions );
 
         if ( null !== $cache ) {
             $cache->put( $cacheKey, $result['output'], $this->resolveCacheTtl( $container ) );
@@ -393,7 +394,12 @@ abstract class ArtisanPackAgent
     /**
      * Resolve the instructions the agent should use for its next run.
      *
-     * Precedence:
+     * Called by `run()` before dispatching to `execute()`; the resolved
+     * string is passed as the `$instructions` argument of `execute()`.
+     * Subclasses do NOT need to call this themselves — the layered value
+     * is already threaded through the pipeline.
+     *
+     * Precedence (top wins):
      *
      *   1. Settings-backed override (`FeatureSettings::instructions()`) —
      *      the "config layer that survives request boundaries" the RFC
@@ -403,8 +409,6 @@ abstract class ArtisanPackAgent
      *
      * `instructions()` remains part of the frozen v1.x public surface —
      * subclasses continue to override it to define their default prompt.
-     * Executors that want the *effective* prompt should call this method
-     * instead of `instructions()` directly.
      *
      * @since 1.0.0
      *
@@ -463,6 +467,14 @@ abstract class ArtisanPackAgent
      * The default implementation raises a runtime exception; subclasses are
      * expected to override with a call into `laravel/ai`.
      *
+     * `$instructions` is the RFC-mandated resolved prompt for this run — it
+     * already reflects the layered precedence (runtime override → settings
+     * → config → `instructions()` class default) so subclasses should pass
+     * this value straight through to `laravel/ai` rather than re-calling
+     * `$this->instructions()`. `$this->instructions()` remains the frozen
+     * class-default hook (subclasses override to declare their default
+     * prompt); it must not be the value that ships to the provider.
+     *
      * The return array must include:
      *   - `output`        : `array<string, mixed>` shaped like `outputSchema()`
      *   - `input_tokens`  : `int`
@@ -470,12 +482,13 @@ abstract class ArtisanPackAgent
      *
      * @since 1.0.0
      *
-     * @param  Credentials  $credentials  Resolved credentials.
-     * @param  string       $model        Resolved model identifier.
+     * @param  Credentials  $credentials   Resolved credentials.
+     * @param  string       $model         Resolved model identifier.
+     * @param  string       $instructions  Resolved system prompt.
      *
      * @return array{ output: array<string, mixed>, input_tokens: int, output_tokens: int }
      */
-    protected function execute( Credentials $credentials, string $model ): array
+    protected function execute( Credentials $credentials, string $model, string $instructions ): array
     {
         throw new LogicException(
             sprintf( 'Agent %s must override execute() to talk to laravel/ai.', static::class ),

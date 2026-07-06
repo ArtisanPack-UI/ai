@@ -3,7 +3,6 @@
 declare( strict_types=1 );
 
 use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
-use ArtisanPackUI\Ai\Credentials\SettingsCredentialStore;
 use ArtisanPackUI\Ai\Support\AiSettingsRegistrar;
 use Tests\Support\FakeAgent;
 
@@ -14,6 +13,28 @@ it( 'register() is a no-op when cms-framework SettingsManager is not loadable', 
     // acceptable — the guarantee is "no exception."
     expect( fn () => app( AiSettingsRegistrar::class )->register() )
         ->not->toThrow( Throwable::class );
+} );
+
+it( 'picks up features registered after the registrar has already run', function (): void {
+    if ( ! AiSettingsRegistrar::isCmsFrameworkAvailable() ) {
+        $this->markTestSkipped( 'cms-framework is not autoloadable in this environment.' );
+    }
+
+    // Registrar runs BEFORE we register the feature.
+    app( AiSettingsRegistrar::class )->register();
+
+    // Feature registration lands after — this simulates a downstream
+    // provider whose boot() executes after ai's.
+    /** @var FeatureRegistry $registry */
+    $registry = app( FeatureRegistry::class );
+    $registry->register( 'late.arrival', FakeAgent::class, [ 'package' => 'downstream/pkg' ] );
+
+    $registered = applyFilters( 'ap.settings.registeredSettings', [] );
+
+    // Without lazy enumeration this key would be missing.
+    expect( $registered )->toHaveKey( 'ai_features.late.arrival.enabled' );
+    expect( $registered )->toHaveKey( 'ai_features.late.arrival.model' );
+    expect( $registered )->toHaveKey( 'ai_features.late.arrival.instructions' );
 } );
 
 it( 'registers credential, feature, budget, and cache settings when cms-framework is available', function (): void {
@@ -29,33 +50,24 @@ it( 'registers credential, feature, budget, and cache settings when cms-framewor
 
     $registered = applyFilters( 'ap.settings.registeredSettings', [] );
 
-    expect( $registered )->toHaveKey( 'ai.credentials.provider' );
-    expect( $registered )->toHaveKey( 'ai.credentials.api_key' );
-    expect( $registered )->toHaveKey( 'ai.credentials.default_model' );
-    expect( $registered )->toHaveKey( 'ai.credentials.base_url' );
+    // Credentials group — aligned with SettingsCredentialStore::KEY_PREFIX
+    // so a write through SettingsManager lands in the same row the store
+    // reads. `api_key` is intentionally NOT registered: it's owned by the
+    // encrypted store and a plaintext write would corrupt the ciphertext.
+    expect( $registered )->toHaveKey( 'ai_credentials.provider' );
+    expect( $registered )->not->toHaveKey( 'ai_credentials.api_key' );
+    expect( $registered )->toHaveKey( 'ai_credentials.default_model' );
+    expect( $registered )->toHaveKey( 'ai_credentials.base_url' );
 
-    expect( $registered )->toHaveKey( 'ai.features.fake.echo.enabled' );
-    expect( $registered )->toHaveKey( 'ai.features.fake.echo.model' );
-    expect( $registered )->toHaveKey( 'ai.features.fake.echo.instructions' );
+    // Features group — aligned with FeatureSettings::KEY_PREFIX.
+    expect( $registered )->toHaveKey( 'ai_features.fake.echo.enabled' );
+    expect( $registered )->toHaveKey( 'ai_features.fake.echo.model' );
+    expect( $registered )->toHaveKey( 'ai_features.fake.echo.instructions' );
 
-    expect( $registered )->toHaveKey( 'ai.budget.monthly_usd' );
-    expect( $registered )->toHaveKey( 'ai.budget.warning_percentage' );
+    // Budget: aligned with BudgetSettings::MONTHLY_CAP_KEY.
+    expect( $registered )->toHaveKey( 'ai.monthly_budget_usd' );
 
-    expect( $registered )->toHaveKey( 'ai.cache.enabled' );
-    expect( $registered )->toHaveKey( 'ai.cache.ttl' );
-} );
-
-it( 'api_key sanitizer redacts every non-empty value it receives', function (): void {
-    if ( ! AiSettingsRegistrar::isCmsFrameworkAvailable() ) {
-        $this->markTestSkipped( 'cms-framework is not autoloadable in this environment.' );
-    }
-
-    app( AiSettingsRegistrar::class )->register();
-
-    $registered = applyFilters( 'ap.settings.registeredSettings', [] );
-
-    $sanitizer = $registered['ai.credentials.api_key']['callback'];
-
-    expect( $sanitizer( 'sk-real-key' ) )->toBe( SettingsCredentialStore::REDACTED_MARKER );
-    expect( $sanitizer( '' ) )->toBe( '' );
+    // Cache (config-only surface for admin visibility).
+    expect( $registered )->toHaveKey( 'ai_cache.enabled' );
+    expect( $registered )->toHaveKey( 'ai_cache.ttl' );
 } );

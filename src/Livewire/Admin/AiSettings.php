@@ -89,13 +89,22 @@ class AiSettings extends Component
     public ?string $defaultModel = null;
 
     /**
-     * Per-feature override map.
+     * Per-feature override list, indexed by ordinal position.
      *
-     * Shape: `[ 'feature.key' => [ 'model' => string|null, 'instructions' => string|null ] ]`.
+     * Livewire 3 splits every `.` in a `wire:model` path into a nested
+     * segment, so if we keyed this array by feature key like
+     * `seo.suggest_meta_description` the client-side write would land at
+     * `featureOverrides['seo']['suggest_meta_description']['model']`
+     * instead of the flat key we expect. To sidestep the dot-nesting we
+     * key the list by ordinal position and carry the feature key on each
+     * entry, then map back to a keyed map on save.
+     *
+     * Shape:
+     *   `[ 0 => [ 'feature_key' => string, 'model' => string|null, 'instructions' => string|null ], ... ]`
      *
      * @since 1.0.0
      *
-     * @var array<string, array{ model: string|null, instructions: string|null }>
+     * @var list<array{ feature_key: string, model: string|null, instructions: string|null }>
      */
     public array $featureOverrides = [];
 
@@ -178,7 +187,26 @@ class AiSettings extends Component
         $this->baseUrl       = $public['base_url'];
         $this->defaultModel  = $public['default_model'];
 
-        $this->featureOverrides = $featureSettings->all();
+        // Intersect stored overrides with the currently-registered features
+        // so we only show rows the admin can actually act on. Overrides for
+        // features registered by packages that have since been removed stay
+        // in the settings table but aren't hydrated into the form — this
+        // prevents `save()` from resurrecting stale rows on the next write.
+        $stored     = $featureSettings->all();
+        $registered = $this->featuresList();
+
+        $this->featureOverrides = [];
+
+        foreach ( $registered as $feature ) {
+            $key      = $feature['key'];
+            $existing = $stored[ $key ] ?? [ 'model' => null, 'instructions' => null ];
+
+            $this->featureOverrides[] = [
+                'feature_key'  => $key,
+                'model'        => $existing['model'] ?? null,
+                'instructions' => $existing['instructions'] ?? null,
+            ];
+        }
     }
 
     /**
@@ -197,6 +225,7 @@ class AiSettings extends Component
             'provider'                        => [ 'required', 'string' ],
             'baseUrl'                         => [ 'nullable', 'string', 'max:2048' ],
             'defaultModel'                    => [ 'nullable', 'string', 'max:255' ],
+            'featureOverrides.*.feature_key'  => [ 'required', 'string' ],
             'featureOverrides.*.model'        => [ 'nullable', 'string', 'max:255' ],
             'featureOverrides.*.instructions' => [ 'nullable', 'string', 'max:20000' ],
         ];
@@ -214,6 +243,14 @@ class AiSettings extends Component
      */
     public function save( SettingsCredentialStore $store, FeatureSettings $featureSettings ): void
     {
+        // Consume the plaintext into a local and clear the public prop up
+        // front so no non-happy-path (validate() throws, addError()+return,
+        // partial save DB failure) can re-serialise the just-typed secret
+        // into the next Livewire snapshot. Any subsequent addError() only
+        // repaints the form with an empty api-key field.
+        $typedApiKey  = $this->apiKey;
+        $this->apiKey = null;
+
         $this->validate();
 
         $isOllama = 'ollama' === $this->provider;
@@ -224,25 +261,17 @@ class AiSettings extends Component
             return;
         }
 
-        if ( ! $isOllama && ! $this->apiKeyPresent && ( null === $this->apiKey || '' === $this->apiKey ) ) {
+        if ( ! $isOllama && ! $this->apiKeyPresent && ( null === $typedApiKey || '' === $typedApiKey ) ) {
             $this->addError( 'apiKey', __( 'An API key is required for :provider.', [ 'provider' => $this->provider ] ) );
 
             return;
         }
 
         // Preserve the existing key when the field is left blank — only
-        // overwrite if the admin explicitly typed a new value or explicitly
-        // cleared it (empty string after having entered something is rare
-        // enough that a "clear" checkbox would be over-engineered here).
-        $apiKeyToStore = $this->apiKey;
+        // overwrite if the admin explicitly typed a new value.
+        $apiKeyToStore = $typedApiKey;
 
         if ( null === $apiKeyToStore ) {
-            if ( ! $this->apiKeyPresent && ! $isOllama ) {
-                $this->addError( 'apiKey', __( 'An API key is required.' ) );
-
-                return;
-            }
-
             $existing = $store->load();
 
             if ( null === $existing && ! $isOllama ) {
@@ -261,15 +290,26 @@ class AiSettings extends Component
             baseUrl: $this->normaliseNullable( $this->baseUrl ),
         ) );
 
-        foreach ( $this->featureOverrides as $featureKey => $override ) {
-            $featureSettings->setModel( (string) $featureKey, $this->normaliseNullable( $override['model'] ?? null ) );
-            $featureSettings->setInstructions( (string) $featureKey, $this->normaliseNullable( $override['instructions'] ?? null ) );
+        // Only persist overrides for features that are currently registered
+        // — the mount() intersection already limits the list, but a crafted
+        // payload can inject arbitrary entries. Skip any row whose
+        // feature_key isn't in the current registry.
+        $registeredKeys = array_column( $this->featuresList(), 'key' );
+
+        foreach ( $this->featureOverrides as $override ) {
+            $featureKey = (string) ( $override['feature_key'] ?? '' );
+
+            if ( '' === $featureKey || ! in_array( $featureKey, $registeredKeys, true ) ) {
+                continue;
+            }
+
+            $featureSettings->setModel( $featureKey, $this->normaliseNullable( $override['model'] ?? null ) );
+            $featureSettings->setInstructions( $featureKey, $this->normaliseNullable( $override['instructions'] ?? null ) );
         }
 
         // Re-read the store to refresh the "•••••" indicator.
         $public              = $store->toPublicArray();
         $this->apiKeyPresent = (bool) $public['api_key_present'];
-        $this->apiKey        = null;
 
         $this->toast = [
             'type'    => 'success',
@@ -292,16 +332,20 @@ class AiSettings extends Component
      */
     public function testConnection( ConnectionTester $tester, SettingsCredentialStore $store ): void
     {
-        $apiKey = $this->apiKey;
+        // Same discipline as save(): move the plaintext out of the public
+        // prop before anything else so the response snapshot never re-emits
+        // the typed value.
+        $typedApiKey  = $this->apiKey;
+        $this->apiKey = null;
 
-        if ( null === $apiKey ) {
-            $existing = $store->load();
-            $apiKey   = null === $existing ? '' : $existing->apiKey;
+        if ( null === $typedApiKey ) {
+            $existing    = $store->load();
+            $typedApiKey = null === $existing ? '' : $existing->apiKey;
         }
 
         $credentials = new Credentials(
             provider: $this->provider,
-            apiKey: (string) $apiKey,
+            apiKey: (string) $typedApiKey,
             defaultModel: $this->normaliseNullable( $this->defaultModel ),
             baseUrl: $this->normaliseNullable( $this->baseUrl ),
         );

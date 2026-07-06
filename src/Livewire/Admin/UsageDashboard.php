@@ -14,10 +14,12 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ai\Livewire\Admin;
 
 use ArtisanPackUI\Ai\Repositories\AiUsageRepository;
+use Carbon\Exceptions\InvalidFormatException;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Support\Carbon;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 /**
@@ -56,10 +58,17 @@ class UsageDashboard extends Component
     /**
      * Feature key of the drilldown row currently open (null = list view).
      *
+     * Marked `#[Locked]` so the only path into this property is
+     * `openDrilldown()` — a Livewire client can't PATCH it directly. This
+     * keeps future per-feature RBAC gates authoritative (a role that lacks
+     * access to feature X can't observe its usage rows by tampering with
+     * this string).
+     *
      * @since 1.0.0
      *
      * @var string|null
      */
+    #[Locked]
     public ?string $drilldownFeature = null;
 
     /**
@@ -234,11 +243,7 @@ class UsageDashboard extends Component
      */
     protected function fromDate(): ?Carbon
     {
-        if ( '' === trim( $this->from ) ) {
-            return null;
-        }
-
-        return Carbon::parse( $this->from )->startOfDay();
+        return $this->parseBound( $this->from, endOfDay: false );
     }
 
     /**
@@ -250,11 +255,41 @@ class UsageDashboard extends Component
      */
     protected function toDate(): ?Carbon
     {
-        if ( '' === trim( $this->to ) ) {
+        return $this->parseBound( $this->to, endOfDay: true );
+    }
+
+    /**
+     * Parse a wire-model-bound date string into a Carbon bound.
+     *
+     * `wire:model.live` sends partial values on some clients (and Livewire
+     * itself will accept any string a crafted payload posts), so
+     * `Carbon::parse` on the raw input would throw and 500 the whole
+     * dashboard mid-typing. Treat any unparseable string as "no bound" —
+     * the widgets fall back to the full history until a valid ISO date
+     * arrives.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $raw       Raw input string.
+     * @param  bool    $endOfDay  Whether to snap to end-of-day (upper bound).
+     *
+     * @return Carbon|null
+     */
+    protected function parseBound( string $raw, bool $endOfDay ): ?Carbon
+    {
+        $trimmed = trim( $raw );
+
+        if ( '' === $trimmed ) {
             return null;
         }
 
-        return Carbon::parse( $this->to )->endOfDay();
+        try {
+            $parsed = Carbon::parse( $trimmed );
+        } catch ( InvalidFormatException $exception ) {
+            return null;
+        }
+
+        return $endOfDay ? $parsed->endOfDay() : $parsed->startOfDay();
     }
 
     /**

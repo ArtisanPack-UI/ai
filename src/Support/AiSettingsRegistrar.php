@@ -14,7 +14,6 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ai\Support;
 
 use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
-use ArtisanPackUI\Ai\Credentials\SettingsCredentialStore;
 use ArtisanPackUI\Ai\Registry\FeatureDefinition;
 use ArtisanPackUI\CMSFramework\Modules\Settings\Enums\SettingType;
 use ArtisanPackUI\CMSFramework\Modules\Settings\Managers\SettingsManager;
@@ -24,10 +23,18 @@ use Illuminate\Contracts\Container\Container;
  * Populates cms-framework's SettingsManager with the four AI setting groups
  * described in the RFC:
  *
- *   - `ai.credentials.*`  — provider, API key (encrypted), default model, base URL
- *   - `ai.features.*`     — per-feature toggle + model + instructions overrides
- *   - `ai.budget.*`       — monthly cap + warning threshold
- *   - `ai.cache.*`        — enabled + TTL
+ *   - `ai_credentials.*` — provider, default model, base URL (the encrypted
+ *                          `api_key` is owned by SettingsCredentialStore and
+ *                          intentionally NOT registered here).
+ *   - `ai_features.*`    — per-feature toggle + model + instructions overrides.
+ *                          Registered lazily via the
+ *                          `ap.settings.registeredSettings` filter so features
+ *                          registered after ai's boot() still show up.
+ *   - `ai.monthly_budget_usd` — matches `BudgetSettings::MONTHLY_CAP_KEY`.
+ *   - `ai_cache.*`       — informational: cache is config-only at runtime.
+ *
+ * The keys deliberately match the actual storage prefixes so an admin edit
+ * through SettingsManager lands in the same row the runtime reads.
  *
  * Registration is a no-op when cms-framework isn't installed — every caller
  * is guarded by a `class_exists()` check on `SettingsManager` in the ai
@@ -42,20 +49,23 @@ use Illuminate\Contracts\Container\Container;
 final class AiSettingsRegistrar
 {
     /**
-     * Prefix used for keys that show up in the cms-framework admin.
+     * Prefixes used when registering AI settings with SettingsManager.
      *
-     * These are the *public* keys registered against `SettingsManager`. They
-     * intentionally use dot notation so the framework can lay them out under
-     * an "AI" section on its admin nav. The credentials store separately
-     * writes encrypted rows under the legacy `ai_credentials.*` /
-     * `ai_features.*` prefixes; those are private to the store.
+     * These are aligned with the underlying stores' actual key conventions
+     * so a write through cms-framework's SettingsManager lands in the same
+     * row that `SettingsCredentialStore`, `FeatureSettings` and
+     * `BudgetSettings` read. Previously the registrar advertised
+     * dot-separated prefixes (`ai.credentials.*`, `ai.features.*`) while
+     * the stores used underscores (`ai_credentials.*`, `ai_features.*`) —
+     * so admin edits via SettingsManager were silently ignored by the
+     * runtime.
      *
      * @since 1.0.0
      */
-    public const CREDENTIALS_PREFIX = 'ai.credentials.';
-    public const FEATURES_PREFIX    = 'ai.features.';
-    public const BUDGET_PREFIX      = 'ai.budget.';
-    public const CACHE_PREFIX       = 'ai.cache.';
+    public const CREDENTIALS_PREFIX = 'ai_credentials.';
+    public const FEATURES_PREFIX    = 'ai_features.';
+    public const BUDGET_PREFIX      = 'ai.';
+    public const CACHE_PREFIX       = 'ai_cache.';
 
     /**
      * Build the registrar.
@@ -132,12 +142,11 @@ final class AiSettingsRegistrar
             SettingType::String,
         );
 
-        $settings->registerSetting(
-            self::CREDENTIALS_PREFIX . 'api_key',
-            '',
-            static fn ( $value ): string => '' === (string) $value ? '' : SettingsCredentialStore::REDACTED_MARKER,
-            SettingType::String,
-        );
+        // NOTE: `api_key` is intentionally NOT registered here. The plaintext
+        // key is owned by `SettingsCredentialStore` which encrypts at rest,
+        // so a write through the generic `SettingsManager` path would
+        // corrupt the ciphertext and a read would return unusable data. The
+        // admin surface writes go through the store directly.
 
         $settings->registerSetting(
             self::CREDENTIALS_PREFIX . 'default_model',
@@ -157,12 +166,12 @@ final class AiSettingsRegistrar
     /**
      * Setting keys for every registered feature (toggle + model + instructions).
      *
-     * We iterate the ai FeatureRegistry so cms-framework's admin can render
-     * a row per feature without the ai package hard-coding known feature
-     * keys. New downstream packages that register a feature after boot are
-     * expected to run this registration in their own service provider's
-     * `boot()`; the RFC's ecosystem convention lives on the
-     * `ap.ai.register-features` filter.
+     * Instead of iterating the FeatureRegistry at boot() — which would miss
+     * every feature registered by a downstream provider whose boot() runs
+     * after ours — we hook the `ap.settings.registeredSettings` filter so
+     * enumeration happens lazily each time cms-framework asks for the
+     * current setting catalog. That means features registered after ai's
+     * boot() still show up in the admin the first time it's rendered.
      *
      * @since 1.0.0
      *
@@ -172,39 +181,52 @@ final class AiSettingsRegistrar
      */
     protected function registerFeaturesGroup( SettingsManager $settings ): void
     {
-        if ( ! $this->container->bound( FeatureRegistry::class ) ) {
+        if ( ! function_exists( 'addFilter' ) ) {
             return;
         }
 
-        /** @var FeatureRegistry $registry */
-        $registry = $this->container->make( FeatureRegistry::class );
+        $container = $this->container;
+        $bool      = $this->boolSanitizer();
+        $nullable  = $this->nullableStringSanitizer();
+        $prefix    = self::FEATURES_PREFIX;
 
-        foreach ( $registry->all() as $definition ) {
-            if ( ! $definition instanceof FeatureDefinition ) {
-                continue;
-            }
+        addFilter(
+            'ap.settings.registeredSettings',
+            static function ( array $registered ) use ( $container, $bool, $nullable, $prefix ): array {
+                if ( ! $container->bound( FeatureRegistry::class ) ) {
+                    return $registered;
+                }
 
-            $settings->registerSetting(
-                self::FEATURES_PREFIX . $definition->featureKey . '.enabled',
-                true,
-                $this->boolSanitizer(),
-                SettingType::Boolean,
-            );
+                /** @var FeatureRegistry $registry */
+                $registry = $container->make( FeatureRegistry::class );
 
-            $settings->registerSetting(
-                self::FEATURES_PREFIX . $definition->featureKey . '.model',
-                null,
-                $this->nullableStringSanitizer(),
-                SettingType::String,
-            );
+                foreach ( $registry->all() as $definition ) {
+                    if ( ! $definition instanceof FeatureDefinition ) {
+                        continue;
+                    }
 
-            $settings->registerSetting(
-                self::FEATURES_PREFIX . $definition->featureKey . '.instructions',
-                null,
-                $this->nullableStringSanitizer(),
-                SettingType::String,
-            );
-        }
+                    $registered[ $prefix . $definition->featureKey . '.enabled' ] = [
+                        'default'  => true,
+                        'type'     => SettingType::Boolean,
+                        'callback' => $bool,
+                    ];
+
+                    $registered[ $prefix . $definition->featureKey . '.model' ] = [
+                        'default'  => null,
+                        'type'     => SettingType::String,
+                        'callback' => $nullable,
+                    ];
+
+                    $registered[ $prefix . $definition->featureKey . '.instructions' ] = [
+                        'default'  => null,
+                        'type'     => SettingType::String,
+                        'callback' => $nullable,
+                    ];
+                }
+
+                return $registered;
+            },
+        );
     }
 
     /**
@@ -218,17 +240,14 @@ final class AiSettingsRegistrar
      */
     protected function registerBudgetGroup( SettingsManager $settings ): void
     {
+        // Aligned with `BudgetSettings::MONTHLY_CAP_KEY = 'ai.monthly_budget_usd'`
+        // so an admin edit via SettingsManager reaches the same row the
+        // runtime reads. The warning_percentage field lives only in config
+        // (not in the settings table) and is not registered here.
         $settings->registerSetting(
-            self::BUDGET_PREFIX . 'monthly_usd',
+            BudgetSettings::MONTHLY_CAP_KEY,
             null,
             $this->nullableFloatSanitizer(),
-            SettingType::Float,
-        );
-
-        $settings->registerSetting(
-            self::BUDGET_PREFIX . 'warning_percentage',
-            80.0,
-            $this->floatSanitizer(),
             SettingType::Float,
         );
     }
@@ -244,16 +263,23 @@ final class AiSettingsRegistrar
      */
     protected function registerCacheGroup( SettingsManager $settings ): void
     {
+        // Cache settings live entirely in `config/artisanpack/ai.php`
+        // (`artisanpack.ai.cache.enabled` / `.ttl`) and are not read from
+        // the settings table at runtime. We still surface them so the
+        // admin has a visible location — writes will land in the settings
+        // table but consumers ignore them. If an app needs runtime-editable
+        // cache flags, a downstream package should extend the ai package
+        // with a store analogous to `BudgetSettings`.
         $settings->registerSetting(
             self::CACHE_PREFIX . 'enabled',
-            false,
+            (bool) config( 'artisanpack.ai.cache.enabled', false ),
             $this->boolSanitizer(),
             SettingType::Boolean,
         );
 
         $settings->registerSetting(
             self::CACHE_PREFIX . 'ttl',
-            2_592_000,
+            (int) config( 'artisanpack.ai.cache.ttl', 2_592_000 ),
             $this->intSanitizer(),
             SettingType::Integer,
         );

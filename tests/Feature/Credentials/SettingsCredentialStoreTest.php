@@ -187,3 +187,20 @@ it( 'loads Ollama credentials with an empty API key when a base URL is present',
     expect( $loaded->baseUrl )->toBe( 'http://127.0.0.1:11434' );
     expect( $loaded->defaultModel )->toBe( 'llama3.2:3b' );
 } );
+
+it( 'reports api_key_present=false after saving an empty-key Ollama credential set', function (): void {
+    /** @var SettingsCredentialStore $store */
+    $store = app( SettingsCredentialStore::class );
+
+    $store->save( new Credentials(
+        provider: 'ollama',
+        apiKey: '',
+        baseUrl: 'http://127.0.0.1:11434',
+    ) );
+
+    // Regression for the save-cascade cliff: encryptString('') used to
+    // write a non-empty ciphertext row, making toPublicArray() report
+    // api_key_present=true and letting a subsequent provider swap in
+    // the admin UI silently write an empty Anthropic key.
+    expect( $store->toPublicArray()['api_key_present'] )->toBeFalse();
+} );

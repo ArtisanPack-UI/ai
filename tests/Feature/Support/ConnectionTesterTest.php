@@ -57,9 +57,9 @@ it( 'reports error when Ollama returns a non-2xx status', function (): void {
     expect( $result['message'] )->toContain( 'HTTP 500' );
 } );
 
-it( 'catches transport errors and returns RESULT_ERROR', function (): void {
+it( 'catches transport errors and returns RESULT_ERROR without leaking exception details', function (): void {
     Http::fake( function (): void {
-        throw new RuntimeException( 'Connection refused' );
+        throw new RuntimeException( 'Connection refused with secret token abc123' );
     } );
 
     $tester = app( ConnectionTester::class );
@@ -71,7 +71,44 @@ it( 'catches transport errors and returns RESULT_ERROR', function (): void {
     ) );
 
     expect( $result['result'] )->toBe( ConnectionTester::RESULT_ERROR );
-    expect( $result['message'] )->toBe( 'Connection refused' );
+    // The raw exception message may echo credentials or hostile daemon
+    // output; the tester now returns a generic message and lets the
+    // application log preserve the real trace.
+    expect( $result['message'] )->not->toContain( 'Connection refused' );
+    expect( $result['message'] )->not->toContain( 'abc123' );
+    expect( $result['message'] )->toContain( 'log' );
+} );
+
+it( 'rejects Ollama base URLs pointing at the cloud metadata range', function (): void {
+    Http::fake();
+
+    $tester = app( ConnectionTester::class );
+
+    $result = $tester->test( new Credentials(
+        provider: 'ollama',
+        apiKey: '',
+        baseUrl: 'http://169.254.169.254/latest/meta-data/',
+    ) );
+
+    expect( $result['result'] )->toBe( ConnectionTester::RESULT_ERROR );
+    expect( $result['message'] )->toContain( 'cloud metadata' );
+    Http::assertNothingSent();
+} );
+
+it( 'rejects Ollama base URLs with a non-http scheme', function (): void {
+    Http::fake();
+
+    $tester = app( ConnectionTester::class );
+
+    $result = $tester->test( new Credentials(
+        provider: 'ollama',
+        apiKey: '',
+        baseUrl: 'file:///etc/passwd',
+    ) );
+
+    expect( $result['result'] )->toBe( ConnectionTester::RESULT_ERROR );
+    expect( $result['message'] )->toContain( 'scheme' );
+    Http::assertNothingSent();
 } );
 
 it( 'reports OK for Anthropic when /v1/models returns 200', function (): void {

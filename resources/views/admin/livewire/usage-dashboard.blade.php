@@ -110,7 +110,7 @@
                     <x-artisanpack-button
                         size="sm"
                         icon="o-magnifying-glass"
-                        wire:click="openDrilldown('{{ $row['feature_key'] }}')"
+                        wire:click="openDrilldown({{ \Illuminate\Support\Js::from( $row['feature_key'] ) }})"
                     >
                         {{ __( 'View' ) }}
                     </x-artisanpack-button>

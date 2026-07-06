@@ -148,9 +148,19 @@ final class FeatureSettings
             return [];
         }
 
-        $rows = $this->db->connection()
-            ->table( 'settings' )
-            ->where( 'key', 'like', self::KEY_PREFIX . '%' )
+        // Escape SQL LIKE metacharacters in the prefix so `ai_features.` (with
+        // its literal `_`) doesn't accidentally match sibling namespaces like
+        // `aiXfeatures.` or `ai.features.` — the `_` is a single-char
+        // wildcard on MySQL/Postgres/SQLite. The ESCAPE clause is standard
+        // SQL so it works across all three drivers; the column reference
+        // is wrapped through the query grammar so identifier quoting stays
+        // driver-appropriate.
+        $connection = $this->db->connection();
+        $escaped    = addcslashes( self::KEY_PREFIX, '\\_%' );
+        $keyColumn  = $connection->getQueryGrammar()->wrap( 'key' );
+
+        $rows = $connection->table( 'settings' )
+            ->whereRaw( $keyColumn . ' LIKE ? ESCAPE ?', [ $escaped . '%', '\\' ] )
             ->pluck( 'value', 'key' )
             ->all();
 

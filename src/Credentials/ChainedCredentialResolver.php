@@ -208,9 +208,14 @@ class ChainedCredentialResolver implements CredentialResolver
         }
 
         if ( null !== $featureKey ) {
-            $slug             = strtoupper( str_replace( [ '.', '-' ], '_', $featureKey ) );
-            $featureModelEnv  = env( 'ARTISANPACK_AI_' . $slug . '_MODEL' );
+            $slug            = strtoupper( str_replace( [ '.', '-' ], '_', $featureKey ) );
+            $featureModelEnv = getenv( 'ARTISANPACK_AI_' . $slug . '_MODEL' );
 
+            // getenv() reads the actual process environment (populated at
+            // process start), which survives `php artisan config:cache` in
+            // production. env() reads dotenv-loaded state that is unreliable
+            // in cached mode and is forbidden outside config files by
+            // CLAUDE.md.
             if ( is_string( $featureModelEnv ) && '' !== $featureModelEnv ) {
                 $defaultModel = $featureModelEnv;
             }
@@ -247,7 +252,15 @@ class ChainedCredentialResolver implements CredentialResolver
     }
 
     /**
-     * Fetch a value from env first, falling back to a config key.
+     * Fetch a value from real process env first, falling back to a config
+     * key.
+     *
+     * Historically this called `env()` directly, but that reads dotenv-loaded
+     * state which is unreliable under `php artisan config:cache` — env vars
+     * that fed the config-file defaults still work (they land in the merged
+     * config), but the raw env branch of the precedence chain silently
+     * disappears in production. `getenv()` reads the actual process
+     * environment which is stable across cache modes.
      *
      * @since 1.0.0
      *
@@ -258,7 +271,7 @@ class ChainedCredentialResolver implements CredentialResolver
      */
     protected function envOrConfig( string $envKey, string $configKey ): ?string
     {
-        $value = env( $envKey );
+        $value = getenv( $envKey );
 
         if ( is_string( $value ) && '' !== $value ) {
             return $value;

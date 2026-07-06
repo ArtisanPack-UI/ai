@@ -284,6 +284,30 @@ it( 'resolveModel() prefers FeatureSettings overrides above config and credentia
     );
 } );
 
+it( 'threads resolvedInstructions() into execute() so overrides actually reach the model call', function (): void {
+    $this->createSettingsTable();
+
+    /** @var ArtisanPackUI\Ai\Support\FeatureSettings $settings */
+    $settings = app( ArtisanPackUI\Ai\Support\FeatureSettings::class );
+    $settings->resetSettingsTableProbe();
+    $settings->setInstructions( 'fake.echo', 'Persisted prompt.' );
+
+    $agent = FakeAgent::for( 'hi' );
+    $agent->run();
+
+    // The persisted override — not the class default — must be what execute()
+    // received. Regression for the "resolvedInstructions() is dead code"
+    // review finding.
+    expect( $agent->lastInstructions )->toBe( 'Persisted prompt.' );
+} );
+
+it( 'passes the class default instructions when no override is set', function (): void {
+    $agent = FakeAgent::for( 'hi' );
+    $agent->run();
+
+    expect( $agent->lastInstructions )->toBe( 'Echo the input.' );
+} );
+
 it( 'FeatureSettings model override is bypassed by an explicit withModel()', function (): void {
     Event::fake( [ AgentUsageRecorded::class ] );
 

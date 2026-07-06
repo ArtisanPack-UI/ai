@@ -20,13 +20,17 @@ use ArtisanPackUI\Ai\Credentials\Credentials;
 use ArtisanPackUI\Ai\Support\ConnectionTester;
 
 beforeEach( function (): void {
-    if ( '1' !== env( 'ARTISANPACK_AI_OLLAMA_E2E' ) ) {
+    // Read the gating flag via getenv() so this stays valid outside a
+    // config file (CLAUDE.md: env() is banned outside config, but getenv()
+    // is the process-env accessor those rules are pointing at).
+    if ( '1' !== getenv( 'ARTISANPACK_AI_OLLAMA_E2E' ) ) {
         $this->markTestSkipped( 'ARTISANPACK_AI_OLLAMA_E2E is not set; skipping real Ollama round-trip.' );
     }
 } )->group( 'ollama-e2e' );
 
 it( 'reaches the local Ollama daemon and lists at least one model', function (): void {
-    $baseUrl = env( 'ARTISANPACK_AI_BASE_URL', 'http://127.0.0.1:11434' );
+    $baseUrl = getenv( 'ARTISANPACK_AI_BASE_URL' );
+    $baseUrl = is_string( $baseUrl ) && '' !== $baseUrl ? $baseUrl : 'http://127.0.0.1:11434';
 
     $tester = app( ConnectionTester::class );
 
