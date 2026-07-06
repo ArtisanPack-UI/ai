@@ -31,6 +31,11 @@
                     {{ __( 'Usage dashboard — tokens, cost, per-feature breakdown' ) }}
                 </a>
             </li>
+            <li>
+                <a href="{{ route( 'admin.packages.ai.features' ) }}" class="link link-primary">
+                    {{ __( 'Features — toggle each registered agent on or off' ) }}
+                </a>
+            </li>
         </ul>
     </div>
 </body>

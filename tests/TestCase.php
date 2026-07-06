@@ -111,5 +111,11 @@ abstract class TestCase extends BaseTestCase
             'prefix'                  => '',
             'foreign_key_constraints' => true,
         ] );
+
+        // The shipped default is `['api', 'auth:sanctum']`, but Testbench
+        // doesn't ship a `sanctum` guard. Downgrade to the plain `auth`
+        // middleware so `actingAs()` works in feature tests without pulling
+        // in laravel/sanctum. Individual tests can still override.
+        $app['config']->set( 'artisanpack.ai.api.middleware', [ 'api', 'auth' ] );
     }
 }

@@ -173,6 +173,34 @@ class AiServiceProvider extends ServiceProvider
         $this->registerCmsFrameworkSettings();
         $this->registerLivewireComponents();
         $this->registerAdminPages();
+        $this->registerApiRoutes();
+    }
+
+    /**
+     * Register the JSON API routes used by the React and Vue admin
+     * surfaces.
+     *
+     * Apps can opt out entirely by setting
+     * `artisanpack.ai.api.enabled = false`, or wrap the shipped routes in
+     * a different middleware stack by editing
+     * `artisanpack.ai.api.middleware`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerApiRoutes(): void
+    {
+        if ( ! (bool) config( 'artisanpack.ai.api.enabled', true ) ) {
+            return;
+        }
+
+        $middleware = (array) config( 'artisanpack.ai.api.middleware', [ 'api', 'auth:sanctum' ] );
+        $prefix     = (string) config( 'artisanpack.ai.api.prefix', 'api/artisanpack-ai' );
+
+        \Illuminate\Support\Facades\Route::middleware( $middleware )
+            ->prefix( $prefix )
+            ->group( __DIR__ . '/../routes/api.php' );
     }
 
     /**
@@ -199,6 +227,10 @@ class AiServiceProvider extends ServiceProvider
         \Livewire\Livewire::component(
             'artisanpack-ai.admin.usage',
             Livewire\Admin\UsageDashboard::class,
+        );
+        \Livewire\Livewire::component(
+            'artisanpack-ai.admin.features',
+            Livewire\Admin\FeatureToggles::class,
         );
     }
 
@@ -252,6 +284,18 @@ class AiServiceProvider extends ServiceProvider
                 'action'     => fn () => view( 'artisanpack-ai::admin.pages.usage' ),
                 'icon'       => 'o-chart-bar',
                 'order'      => 2,
+                'capability' => 'manage_ai_settings',
+            ],
+        );
+
+        apAddSubAdminPage(
+            (string) __( 'Features' ),
+            'packages/ai/features',
+            'packages/ai',
+            [
+                'action'     => fn () => view( 'artisanpack-ai::admin.pages.features' ),
+                'icon'       => 'o-adjustments-horizontal',
+                'order'      => 3,
                 'capability' => 'manage_ai_settings',
             ],
         );
