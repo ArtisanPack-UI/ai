@@ -49,7 +49,17 @@ it( 'orders features deterministically by package then key', function (): void {
     $registry->register( 'a.feature', SomeAgentStub::class, [ 'package' => 'artisanpack-ui/a' ] );
     $registry->register( 'a.other', SomeAgentStub::class, [ 'package' => 'artisanpack-ui/a' ] );
 
-    $order = $registry->all()->map( fn ( FeatureDefinition $d ): string => $d->featureKey )->all();
+    // Filter to the features this test registered — the ai package
+    // auto-registers its own cross-cutting agents (ai.alt_text, etc.) via
+    // `aiFeatures()` so `->all()` includes them too. This test only cares
+    // that the sort key is `[package, featureKey]`, exercised on features
+    // this test controls.
+    $ownKeys = [ 'a.feature', 'a.other', 'z.feature' ];
+    $order   = $registry->all()
+        ->map( fn ( FeatureDefinition $d ): string => $d->featureKey )
+        ->filter( fn ( string $key ): bool => in_array( $key, $ownKeys, true ) )
+        ->values()
+        ->all();
 
     expect( $order )->toBe( [ 'a.feature', 'a.other', 'z.feature' ] );
 } );

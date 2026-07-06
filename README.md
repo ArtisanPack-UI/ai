@@ -60,6 +60,7 @@ That single call runs the full pipeline: feature-gate check → credential resol
 ## Documentation
 
 - **[Authoring agents](docs/authoring-agents.md)** — how a downstream package adds a new AI capability, worked through with `MetaDescriptionAgent` as the running example.
+- **[Built-in agents](docs/built-in-agents.md)** — the cross-cutting agents shipped in this package itself (`AltTextGenerationAgent`, `ContentRewriteAgent`, `SummarizationAgent`) — inputs, output schemas, and consumer notes.
 - **[Bring your own key (BYOK)](docs/byok.md)** — env-mode vs. CMS-mode setup, provider-specific notes for Anthropic, OpenAI, Gemini, Groq, and Ollama.
 - **[Overriding](docs/overriding.md)** — container binding and config override patterns for replacing a shipped agent with your own subclass.
 - **[JSON API schema](docs/api-schema.json)** — OpenAPI 3.1 schema for the REST endpoints that back the React and Vue admin surfaces.

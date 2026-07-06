@@ -13,6 +13,7 @@ beforeEach( function (): void {
     }
 
     $this->createSettingsTable();
+    $this->clearFeatureRegistry();
 
     /** @var FeatureRegistry $registry */
     $registry = app( FeatureRegistry::class );
