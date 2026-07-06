@@ -46,12 +46,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    name: Test (Livewire ${{ matrix.livewire }})
+    name: Test (PHP ${{ matrix.php }}, Laravel ${{ matrix.laravel }})
 
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        livewire: ['3.6', '4.0']
+        php: ['8.2', '8.3', '8.4', '8.5']
+        laravel: ['11', '12', '13']
 
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +60,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: ${{ matrix.php }}
           extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite
           coverage: none
 
@@ -71,14 +72,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-composer-lw${{ matrix.livewire }}-${{ hashFiles('**/composer.json') }}
-          restore-keys: ${{ runner.os }}-composer-lw${{ matrix.livewire }}-
+          key: ${{ runner.os }}-composer-php${{ matrix.php }}-l${{ matrix.laravel }}-${{ hashFiles('**/composer.json') }}
+          restore-keys: ${{ runner.os }}-composer-php${{ matrix.php }}-l${{ matrix.laravel }}-
 
-      - name: Install dependencies
-        run: composer install --no-interaction --prefer-dist
-
-      - name: Install Livewire ${{ matrix.livewire }}
-        run: composer require livewire/livewire:"^${{ matrix.livewire }}" -W --no-interaction
+      - name: Install Laravel ${{ matrix.laravel }}
+        run: |
+          composer require \
+            "illuminate/support:^${{ matrix.laravel }}.0" \
+            -W --no-interaction --no-update
+          composer update --no-interaction --prefer-dist
 
       - name: Run Unit tests
         env:
