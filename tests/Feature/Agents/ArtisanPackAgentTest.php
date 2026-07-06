@@ -225,3 +225,103 @@ it( 'uses the runtime credential override in preference to the resolver', functi
 
     expect( $result )->toBe( [ 'echo' => 'hi' ] );
 } );
+
+it( 'resolvedInstructions() returns the class default when no override is set', function (): void {
+    $agent = FakeAgent::for( 'hi' );
+
+    expect( $agent->resolvedInstructions() )->toBe( 'Echo the input.' );
+} );
+
+it( 'resolvedInstructions() prefers config over the class default', function (): void {
+    config( [ 'artisanpack.ai.features' => [ 'fake.echo' => [ 'instructions' => 'Config prompt.' ] ] ] );
+
+    $agent = FakeAgent::for( 'hi' );
+
+    expect( $agent->resolvedInstructions() )->toBe( 'Config prompt.' );
+} );
+
+it( 'resolvedInstructions() falls back to class default when the config override is empty', function (): void {
+    config( [ 'artisanpack.ai.features' => [ 'fake.echo' => [ 'instructions' => '' ] ] ] );
+
+    $agent = FakeAgent::for( 'hi' );
+
+    expect( $agent->resolvedInstructions() )->toBe( 'Echo the input.' );
+} );
+
+it( 'resolvedInstructions() prefers FeatureSettings overrides above config and class default', function (): void {
+    $this->createSettingsTable();
+
+    config( [ 'artisanpack.ai.features' => [ 'fake.echo' => [ 'instructions' => 'Config prompt.' ] ] ] );
+
+    /** @var ArtisanPackUI\Ai\Support\FeatureSettings $settings */
+    $settings = app( ArtisanPackUI\Ai\Support\FeatureSettings::class );
+    $settings->resetSettingsTableProbe();
+    $settings->setInstructions( 'fake.echo', 'Persisted prompt.' );
+
+    $agent = FakeAgent::for( 'hi' );
+
+    expect( $agent->resolvedInstructions() )->toBe( 'Persisted prompt.' );
+} );
+
+it( 'resolveModel() prefers FeatureSettings overrides above config and credentials', function (): void {
+    Event::fake( [ AgentUsageRecorded::class ] );
+
+    $this->createSettingsTable();
+
+    /** @var ArtisanPackUI\Ai\Support\FeatureSettings $settings */
+    $settings = app( ArtisanPackUI\Ai\Support\FeatureSettings::class );
+    $settings->resetSettingsTableProbe();
+    $settings->setModel( 'fake.echo', 'settings-model' );
+
+    // Config would otherwise win — verify FeatureSettings takes precedence.
+    config( [ 'artisanpack.ai.features' => [ 'fake.echo' => [ 'model' => 'config-model' ] ] ] );
+
+    FakeAgent::for( 'from-settings' )->run();
+
+    Event::assertDispatched(
+        AgentUsageRecorded::class,
+        fn ( AgentUsageRecorded $event ): bool => 'settings-model' === $event->model,
+    );
+} );
+
+it( 'threads resolvedInstructions() into execute() so overrides actually reach the model call', function (): void {
+    $this->createSettingsTable();
+
+    /** @var ArtisanPackUI\Ai\Support\FeatureSettings $settings */
+    $settings = app( ArtisanPackUI\Ai\Support\FeatureSettings::class );
+    $settings->resetSettingsTableProbe();
+    $settings->setInstructions( 'fake.echo', 'Persisted prompt.' );
+
+    $agent = FakeAgent::for( 'hi' );
+    $agent->run();
+
+    // The persisted override — not the class default — must be what execute()
+    // received. Regression for the "resolvedInstructions() is dead code"
+    // review finding.
+    expect( $agent->lastInstructions )->toBe( 'Persisted prompt.' );
+} );
+
+it( 'passes the class default instructions when no override is set', function (): void {
+    $agent = FakeAgent::for( 'hi' );
+    $agent->run();
+
+    expect( $agent->lastInstructions )->toBe( 'Echo the input.' );
+} );
+
+it( 'FeatureSettings model override is bypassed by an explicit withModel()', function (): void {
+    Event::fake( [ AgentUsageRecorded::class ] );
+
+    $this->createSettingsTable();
+
+    /** @var ArtisanPackUI\Ai\Support\FeatureSettings $settings */
+    $settings = app( ArtisanPackUI\Ai\Support\FeatureSettings::class );
+    $settings->resetSettingsTableProbe();
+    $settings->setModel( 'fake.echo', 'settings-model' );
+
+    FakeAgent::for( 'runtime' )->withModel( 'runtime-model' )->run();
+
+    Event::assertDispatched(
+        AgentUsageRecorded::class,
+        fn ( AgentUsageRecorded $event ): bool => 'runtime-model' === $event->model,
+    );
+} );

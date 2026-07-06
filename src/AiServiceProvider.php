@@ -22,8 +22,10 @@ use ArtisanPackUI\Ai\Events\AgentUsageRecorded;
 use ArtisanPackUI\Ai\Listeners\PersistAgentUsage;
 use ArtisanPackUI\Ai\Registry\ArrayFeatureRegistry;
 use ArtisanPackUI\Ai\Repositories\AiUsageRepository;
+use ArtisanPackUI\Ai\Support\AiSettingsRegistrar;
 use ArtisanPackUI\Ai\Support\BudgetSettings;
 use ArtisanPackUI\Ai\Support\CostEstimator;
+use ArtisanPackUI\Ai\Support\FeatureSettings;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -104,6 +106,17 @@ class AiServiceProvider extends ServiceProvider
             );
         } );
 
+        $this->app->singleton( FeatureSettings::class, function ( $app ) {
+            return new FeatureSettings(
+                $app->make( Repository::class ),
+                $app->make( ConnectionResolverInterface::class ),
+            );
+        } );
+
+        $this->app->singleton( AiSettingsRegistrar::class, function ( $app ) {
+            return new AiSettingsRegistrar( $app );
+        } );
+
         // Singleton binding so the memoised table probe on the listener
         // survives across every AgentUsageRecorded event within a request
         // / queue worker.
@@ -157,6 +170,113 @@ class AiServiceProvider extends ServiceProvider
 
         $this->wireSettingsToggleStore();
         $this->autoDiscoverFeatures();
+        $this->registerCmsFrameworkSettings();
+        $this->registerLivewireComponents();
+        $this->registerAdminPages();
+    }
+
+    /**
+     * Register the AI admin Livewire components with Livewire's manager.
+     *
+     * We resolve `Livewire\Livewire` lazily via `class_exists` because
+     * livewire/livewire is only a `require-dev`/`suggest` — apps that don't
+     * use Livewire still boot cleanly.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerLivewireComponents(): void
+    {
+        if ( ! class_exists( \Livewire\Livewire::class ) ) {
+            return;
+        }
+
+        \Livewire\Livewire::component(
+            'artisanpack-ai.admin.settings',
+            Livewire\Admin\AiSettings::class,
+        );
+        \Livewire\Livewire::component(
+            'artisanpack-ai.admin.usage',
+            Livewire\Admin\UsageDashboard::class,
+        );
+    }
+
+    /**
+     * Register the AI settings + usage admin pages under cms-framework's
+     * "Packages" nav section when the framework helper is available.
+     *
+     * The pages themselves are Livewire components — the actions here just
+     * render the mount view. Downstream apps that customise the admin nav
+     * can suppress this by wrapping the ai boot in their own logic.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerAdminPages(): void
+    {
+        if ( ! function_exists( 'apAddAdminPage' ) || ! function_exists( 'apAddSubAdminPage' ) ) {
+            return;
+        }
+
+        apAddAdminPage(
+            (string) __( 'AI' ),
+            'packages/ai',
+            'packages',
+            [
+                'action'     => fn () => view( 'artisanpack-ai::admin.pages.landing' ),
+                'icon'       => 'o-sparkles',
+                'order'      => 20,
+                'capability' => 'manage_ai_settings',
+            ],
+        );
+
+        apAddSubAdminPage(
+            (string) __( 'Settings' ),
+            'packages/ai/settings',
+            'packages/ai',
+            [
+                'action'     => fn () => view( 'artisanpack-ai::admin.pages.settings' ),
+                'icon'       => 'o-cog-6-tooth',
+                'order'      => 1,
+                'capability' => 'manage_ai_settings',
+            ],
+        );
+
+        apAddSubAdminPage(
+            (string) __( 'Usage' ),
+            'packages/ai/usage',
+            'packages/ai',
+            [
+                'action'     => fn () => view( 'artisanpack-ai::admin.pages.usage' ),
+                'icon'       => 'o-chart-bar',
+                'order'      => 2,
+                'capability' => 'manage_ai_settings',
+            ],
+        );
+    }
+
+    /**
+     * Register the four AI setting groups (credentials, features, budget,
+     * cache) with cms-framework's SettingsManager, when available.
+     *
+     * The check is a plain `class_exists()` so we never touch cms-framework
+     * classes on stacks where the package isn't installed. Absence isn't
+     * an error — every ai setting resolves via env / config fallbacks in
+     * that mode.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCmsFrameworkSettings(): void
+    {
+        if ( ! AiSettingsRegistrar::isCmsFrameworkAvailable() ) {
+            return;
+        }
+
+        $this->app->make( AiSettingsRegistrar::class )->register();
     }
 
     /**

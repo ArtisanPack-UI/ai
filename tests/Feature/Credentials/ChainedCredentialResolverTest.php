@@ -129,3 +129,30 @@ it( 'prefers the store over env when both are set', function (): void {
 
     expect( $resolver->resolve()->apiKey )->toBe( 'store-key' );
 } );
+
+it( 'resolves Ollama credentials without an API key, using provider defaults', function (): void {
+    putenv( 'ARTISANPACK_AI_PROVIDER=ollama' );
+
+    $resolver = app( CredentialResolver::class );
+
+    $creds = $resolver->resolve();
+
+    expect( $creds )->toBeInstanceOf( Credentials::class );
+    expect( $creds->provider )->toBe( 'ollama' );
+    expect( $creds->apiKey )->toBe( '' );
+    // Provider-config defaults from config/ai.php's `providers.ollama` block.
+    expect( $creds->baseUrl )->toBe( 'http://127.0.0.1:11434' );
+    expect( $creds->defaultModel )->toBe( 'llama3.2:3b' );
+} );
+
+it( 'honours an explicit Ollama base URL override', function (): void {
+    putenv( 'ARTISANPACK_AI_PROVIDER=ollama' );
+    putenv( 'ARTISANPACK_AI_BASE_URL=http://ollama.internal:11434' );
+
+    $resolver = app( CredentialResolver::class );
+
+    $creds = $resolver->resolve();
+
+    expect( $creds )->not->toBeNull();
+    expect( $creds->baseUrl )->toBe( 'http://ollama.internal:11434' );
+} );

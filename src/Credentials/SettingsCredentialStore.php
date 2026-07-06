@@ -110,10 +110,31 @@ class SettingsCredentialStore
     }
 
     /**
+     * Reset the memoised `settings` table probe.
+     *
+     * Matches the invalidation hook `BudgetSettings` and `FeatureSettings`
+     * already expose so a worker that boots before migrations complete (or
+     * a tenant onboarding that creates the table mid-request) can force a
+     * fresh probe on its next read. Automatically invoked by `write()` so
+     * a successful save re-arms the probe for readers.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function resetSettingsTableProbe(): void
+    {
+        $this->tableExists = null;
+    }
+
+    /**
      * Load stored credentials.
      *
      * Returns null when the `settings` table is unavailable, no provider is
-     * configured, or the stored API key cannot be decrypted.
+     * configured, or the stored API key cannot be decrypted. Ollama is a
+     * special case: it accepts empty API keys because the daemon runs
+     * locally. In that scenario the stored ciphertext row is optional and
+     * an empty decrypted string is valid.
      *
      * @since 1.0.0
      *
@@ -127,17 +148,27 @@ class SettingsCredentialStore
 
         $raw = $this->readRaw();
 
-        if ( null === $raw['provider'] || null === $raw['api_key'] ) {
+        if ( null === $raw['provider'] ) {
             return null;
         }
 
-        try {
-            $apiKey = $this->encrypter()->decryptString( $raw['api_key'] );
-        } catch ( DecryptException $exception ) {
-            return null;
+        $isOllama = 'ollama' === $raw['provider'];
+
+        if ( null === $raw['api_key'] ) {
+            if ( ! $isOllama ) {
+                return null;
+            }
+
+            $apiKey = '';
+        } else {
+            try {
+                $apiKey = $this->encrypter()->decryptString( $raw['api_key'] );
+            } catch ( DecryptException $exception ) {
+                return null;
+            }
         }
 
-        if ( '' === $apiKey ) {
+        if ( '' === $apiKey && ! $isOllama ) {
             return null;
         }
 
@@ -164,7 +195,18 @@ class SettingsCredentialStore
     public function save( Credentials $credentials ): void
     {
         $this->write( 'provider', $credentials->provider );
-        $this->write( 'api_key', $this->encrypter()->encryptString( $credentials->apiKey ) );
+
+        // Storing `encryptString('')` produces a non-empty ciphertext, which
+        // then makes `toPublicArray()['api_key_present']` return true — the
+        // admin UI would report "a key is stored" for a provider that has
+        // no meaningful key (e.g. Ollama). Delete the row when the plaintext
+        // is empty so the "present" signal only fires for real keys.
+        if ( '' === $credentials->apiKey ) {
+            $this->write( 'api_key', null );
+        } else {
+            $this->write( 'api_key', $this->encrypter()->encryptString( $credentials->apiKey ) );
+        }
+
         $this->write( 'default_model', $credentials->defaultModel );
         $this->write( 'base_url', $credentials->baseUrl );
     }
@@ -304,6 +346,11 @@ class SettingsCredentialStore
      */
     protected function write( string $field, ?string $value ): void
     {
+        // Any successful reach into the settings table means the table
+        // exists; refresh the memo so a probe cached before the migration
+        // ran doesn't strand this instance in "table missing" mode.
+        $this->tableExists = null;
+
         $key = self::KEY_PREFIX . $field;
 
         if ( null === $value ) {

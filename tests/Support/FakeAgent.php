@@ -67,6 +67,15 @@ class FakeAgent extends ArtisanPackAgent
     public int $executeCallCount = 0;
 
     /**
+     * Track the most-recent resolved instructions the pipeline handed us.
+     *
+     * @since 1.0.0
+     *
+     * @var string|null
+     */
+    public ?string $lastInstructions = null;
+
+    /**
      * {@inheritDoc}
      */
     public function instructions(): string
@@ -93,14 +102,16 @@ class FakeAgent extends ArtisanPackAgent
      *
      * @since 1.0.0
      *
-     * @param  Credentials  $credentials  Resolved credentials.
-     * @param  string       $model        Resolved model identifier.
+     * @param  Credentials  $credentials   Resolved credentials.
+     * @param  string       $model         Resolved model identifier.
+     * @param  string       $instructions  Resolved system prompt.
      *
      * @return array{ output: array<string, mixed>, input_tokens: int, output_tokens: int }
      */
-    protected function execute( Credentials $credentials, string $model ): array
+    protected function execute( Credentials $credentials, string $model, string $instructions ): array
     {
         $this->executeCallCount++;
+        $this->lastInstructions = $instructions;
 
         $input = $this->input();
         $echo  = is_scalar( $input ) ? (string) $input : json_encode( $input );
