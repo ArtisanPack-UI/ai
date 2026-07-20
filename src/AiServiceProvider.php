@@ -30,6 +30,7 @@ use ArtisanPackUI\Ai\Support\AiSettingsRegistrar;
 use ArtisanPackUI\Ai\Support\BudgetSettings;
 use ArtisanPackUI\Ai\Support\CostEstimator;
 use ArtisanPackUI\Ai\Support\FeatureSettings;
+use ArtisanPackUI\Ai\Support\HookAliases;
 use ArtisanPackUI\Ai\Support\LaravelAiAgentPrompter;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Encryption\Encrypter;
@@ -145,6 +146,8 @@ class AiServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        HookAliases::register();
+
         $this->mergeConfiguration();
 
         $this->loadMigrationsFrom( __DIR__ . '/../database/migrations' );
@@ -450,7 +453,7 @@ class AiServiceProvider extends ServiceProvider
     /**
      * Register features from two sources, in this order:
      *
-     *   1. The `ap.ai.register-features` filter hook — the shared
+     *   1. The `ap.ai.registerFeatures` filter hook — the shared
      *      ecosystem-wide extension convention (see artisanpack-ui/icons
      *      `ap.icons.register-icon-sets`). Callbacks receive the
      *      `FeatureRegistry` and register directly against it.
@@ -476,7 +479,7 @@ class AiServiceProvider extends ServiceProvider
     }
 
     /**
-     * Invoke the `ap.ai.register-features` filter when the hooks helper is
+     * Invoke the `ap.ai.registerFeatures` filter when the hooks helper is
      * available.
      *
      * @since 1.0.0
@@ -497,13 +500,13 @@ class AiServiceProvider extends ServiceProvider
          *
          * @since 1.0.0
          *
-         * @hook  ap.ai.register-features
+         * @hook  ap.ai.registerFeatures
          *
          * @param  FeatureRegistry  $registry  Registry to populate with `register()` calls.
          *
          * @return FeatureRegistry
          */
-        applyFilters( 'ap.ai.register-features', $registry );
+        applyFilters( 'ap.ai.registerFeatures', $registry );
     }
 
     /**
