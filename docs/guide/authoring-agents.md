@@ -93,14 +93,14 @@ class SeoServiceProvider extends ServiceProvider
 
 The AI service provider walks every loaded provider looking for an `aiFeatures()` method, so this alone is enough — no additional wiring required.
 
-### Option B: via the `ap.ai.register-features` filter hook
+### Option B: via the `ap.ai.registerFeatures` filter hook
 
 Prefer this when the registering code doesn't own a service provider (e.g. an application bootstrapping bespoke agents):
 
 ```php
 use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
 
-addFilter( 'ap.ai.register-features', function ( FeatureRegistry $registry ) {
+addFilter( 'ap.ai.registerFeatures', function ( FeatureRegistry $registry ) {
     $registry->register(
         'seo.suggest_meta_description',
         MetaDescriptionAgent::class,

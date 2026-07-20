@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-20
+
+### Changed
+
+- Renamed hook `ap.ai.register-features` → `ap.ai.registerFeatures` to align with cross-package hooks convention. Old name registered as a deprecation alias. Alias removal deferred to next major.
+- Bumped `artisanpack-ui/hooks` to `^1.3`.
+
 ## [1.0.0] - 2026-07-06
 
 Initial stable release of the shared AI foundation for the ArtisanPack UI ecosystem, built on top of `laravel/ai`.
@@ -26,5 +33,6 @@ Initial stable release of the shared AI foundation for the ArtisanPack UI ecosys
 - `ConnectionTester` support utility and `RotateAiCredentialsCommand` artisan command.
 - Documentation restructured into `docs/` with getting-started, guide, integration (including React and Vue examples), and reference sections.
 
-[Unreleased]: https://github.com/ArtisanPack-UI/ai/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ArtisanPack-UI/ai/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/ArtisanPack-UI/ai/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ArtisanPack-UI/ai/releases/tag/v1.0.0
