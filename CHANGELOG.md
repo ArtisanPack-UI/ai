@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `ap.ai.promptGenerated` filter hook, fired inside `LaravelAiAgentPrompter::prompt()` before the provider call. Lets apps inject safety prompts, scrub PII, or add context uniformly across every agent. Signature: `(string $prompt, array $context)`.
+- New `ap.ai.responseReceived` action hook, fired after the provider returns and before JSON decoding. The standard audit / logging seam. Signature: `(string $response, array $context)`.
+
 ## [1.1.0] - 2026-07-20
 
 ### Changed
