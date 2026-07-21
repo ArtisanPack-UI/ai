@@ -79,7 +79,7 @@ class LaravelAiAgentPrompter implements AgentPrompter
          *
          * @hook  ap.ai.promptGenerated
          *
-         * @since 1.2.0
+         * @since 1.1.0
          *
          * @param string               $prompt   Resolved prompt text.
          * @param array<string, mixed> $context  Provider, model, instructions, attachment count.
@@ -128,7 +128,7 @@ class LaravelAiAgentPrompter implements AgentPrompter
          *
          * @hook  ap.ai.responseReceived
          *
-         * @since 1.2.0
+         * @since 1.1.0
          *
          * @param string               $response  Raw provider response text.
          * @param array<string, mixed> $context   Provider, model, instructions, attachment count.
@@ -146,7 +146,7 @@ class LaravelAiAgentPrompter implements AgentPrompter
      * Dispatch the assembled prompt to laravel/ai. Extracted so tests can
      * substitute a stubbed provider without spinning up `Ai::fake()`.
      *
-     * @since 1.2.0
+     * @since 1.1.0
      *
      * @param  StructuredAnonymousAgent  $agent         Anonymous agent instance.
      * @param  string                    $prompt        Prompt text (post-filter).

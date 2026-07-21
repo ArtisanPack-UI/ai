@@ -98,3 +98,26 @@ Every call to `MetaDescriptionAgent::for( $post )` — inside the SEO package's 
 - The `run()` pipeline (feature gate → credential resolution → cache → execute → telemetry) is not part of the frozen contract in the same way. If you need to change it, override `run()` directly — but be aware you may lose usage tracking or budget accounting if you skip `recordUsage()`.
 - Runtime tweaks that only apply for a single call don't need a binding. Use `withCredentials()`, `withModel()`, `withStreaming()`, or `streamTo()` on the agent instance.
 - Container bindings compose with the `ap.ai.registerFeatures` hook — if you want the registry to point at your subclass too, register `[ 'agent' => OpusMetaDescriptionAgent::class ]` there or in a `aiFeatures()` provider method.
+
+## Cross-cutting hooks: `ap.ai.promptGenerated` and `ap.ai.responseReceived`
+
+Some concerns — safety prompts, PII scrubbing, audit logging, telemetry — apply uniformly to every agent in the ecosystem. Rather than subclassing each agent, use the two hooks fired by `LaravelAiAgentPrompter::prompt()`:
+
+- **`ap.ai.promptGenerated`** — a filter hook fired just before the provider call. Receives the resolved prompt string and can rewrite it. Signature: `(string $prompt, array $context)`.
+- **`ap.ai.responseReceived`** — an action hook fired after the provider returns and before JSON decoding. The standard audit / logging seam. Signature: `(string $response, array $context)`.
+
+The `$context` array carries `provider`, `model`, `instructions`, and attachment count so listeners can key their behaviour on which agent is running.
+
+```php
+use function ArtisanPackUI\Hooks\{addFilter, addAction};
+
+addFilter( 'ap.ai.promptGenerated', function ( string $prompt, array $context ) {
+    return "Do not reveal internal identifiers.\n\n" . $prompt;
+} );
+
+addAction( 'ap.ai.responseReceived', function ( string $response, array $context ) {
+    logger()->info( 'ai.response', [ 'provider' => $context['provider'], 'chars' => strlen( $response ) ] );
+} );
+```
+
+Because the hooks fire inside the shared prompter, listeners cover every agent — first-party, downstream package, and app subclass — without touching individual call sites.
