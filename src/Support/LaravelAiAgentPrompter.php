@@ -60,6 +60,32 @@ class LaravelAiAgentPrompter implements AgentPrompter
     ): array {
         [ $prompt, $attachments ] = $this->normalizeMessage( $message );
 
+        // Shared context payload for both hook fire sites. Deliberately
+        // limited to what the prompter itself knows — feature keys live at
+        // the agent layer, so listeners that need per-feature routing should
+        // hang off the concrete agent's own hooks.
+        $context = [
+            'provider'     => $credentials->provider,
+            'model'        => $model,
+            'instructions' => $instructions,
+            'attachments'  => count( $attachments ),
+        ];
+
+        /**
+         * Filter the prompt string before it is sent to the model.
+         *
+         * Provides a uniform seam for safety prompts, PII scrubbing, and
+         * context injection across every agent in the ecosystem.
+         *
+         * @hook  ap.ai.promptGenerated
+         *
+         * @since 1.1.0
+         *
+         * @param string               $prompt   Resolved prompt text.
+         * @param array<string, mixed> $context  Provider, model, instructions, attachment count.
+         */
+        $prompt = (string) applyFilters( 'ap.ai.promptGenerated', $prompt, $context );
+
         // Build the schema map up-front so the SerializableClosure below
         // captures a plain array of Type instances instead of `$this` — a
         // queue/broadcast path that serializes the anonymous agent should
@@ -77,12 +103,7 @@ class LaravelAiAgentPrompter implements AgentPrompter
         $providerName = $this->registerRuntimeProvider( $credentials );
 
         try {
-            $response = $agent->prompt(
-                prompt: $prompt,
-                attachments: $attachments,
-                provider: $providerName,
-                model: $model,
-            );
+            $response = $this->sendToProvider( $agent, $prompt, $attachments, $providerName, $model );
         } catch ( Throwable $exception ) {
             throw FeatureError::forFeature(
                 '(prompter)',
@@ -98,11 +119,56 @@ class LaravelAiAgentPrompter implements AgentPrompter
             $this->releaseRuntimeProvider( $providerName );
         }
 
+        /**
+         * Fired after a model response is received.
+         *
+         * Standard audit/logging seam. Runs before JSON decoding so
+         * listeners see the raw provider text — including cases where the
+         * decode step below will reject the payload.
+         *
+         * @hook  ap.ai.responseReceived
+         *
+         * @since 1.1.0
+         *
+         * @param string               $response  Raw provider response text.
+         * @param array<string, mixed> $context   Provider, model, instructions, attachment count.
+         */
+        doAction( 'ap.ai.responseReceived', $response->text, $context );
+
         return [
             'output'        => $this->decodeOutput( $response ),
             'input_tokens'  => $response->usage->promptTokens,
             'output_tokens' => $response->usage->completionTokens,
         ];
+    }
+
+    /**
+     * Dispatch the assembled prompt to laravel/ai. Extracted so tests can
+     * substitute a stubbed provider without spinning up `Ai::fake()`.
+     *
+     * @since 1.1.0
+     *
+     * @param  StructuredAnonymousAgent  $agent         Anonymous agent instance.
+     * @param  string                    $prompt        Prompt text (post-filter).
+     * @param  array<int, mixed>         $attachments   Typed attachments.
+     * @param  string                    $providerName  Runtime provider config key.
+     * @param  string                    $model         Resolved model identifier.
+     *
+     * @return AgentResponse
+     */
+    protected function sendToProvider(
+        StructuredAnonymousAgent $agent,
+        string $prompt,
+        array $attachments,
+        string $providerName,
+        string $model,
+    ): AgentResponse {
+        return $agent->prompt(
+            prompt: $prompt,
+            attachments: $attachments,
+            provider: $providerName,
+            model: $model,
+        );
     }
 
     /**

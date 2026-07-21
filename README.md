@@ -69,6 +69,32 @@ Start at [docs/home.md](docs/home.md) for the full documentation index. Direct l
 - **[React and Vue integration](docs/integration/react-vue-integration.md)** — authentication, base URLs, and streaming for JavaScript clients.
 - **[JSON API schema](docs/reference/api-schema.json)** — OpenAPI 3.1 schema for the REST endpoints that back the React and Vue admin surfaces.
 
+## Hooks
+
+The package fires hooks from `artisanpack-ui/hooks` at the shared prompter seam, so a downstream package can add safety prompts, PII scrubbing, or audit logging uniformly across every agent — no per-agent patching.
+
+| Hook | Type | Fired | Signature |
+|---|---|---|---|
+| `ap.ai.registerFeatures` | filter | on service-provider boot, so packages can register their feature agents | `(FeatureRegistry $registry)` |
+| `ap.ai.promptGenerated` | filter | inside `LaravelAiAgentPrompter::prompt()` before the provider call | `(string $prompt, array $context)` |
+| `ap.ai.responseReceived` | action | inside `LaravelAiAgentPrompter::prompt()` after the provider returns, before JSON decoding | `(string $response, array $context)` |
+
+`$context` for the prompt/response hooks carries `provider`, `model`, `instructions`, and `attachments` (count).
+
+```php
+addFilter( 'ap.ai.promptGenerated', function ( string $prompt, array $context ): string {
+    return scrubPii( $prompt );
+} );
+
+addAction( 'ap.ai.responseReceived', function ( string $response, array $context ): void {
+    Log::channel( 'ai-audit' )->info( 'model response', [
+        'provider' => $context['provider'],
+        'model'    => $context['model'],
+        'bytes'    => strlen( $response ),
+    ] );
+} );
+```
+
 ## Admin surfaces
 
 Once cms-framework is installed and migrations are run, the following surfaces register automatically under `Admin → Packages → AI`:
