@@ -13,6 +13,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ai\Agents;
 
+use ArtisanPackUI\Ai\Ai;
 use ArtisanPackUI\Ai\Contracts\CredentialResolver;
 use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
 use ArtisanPackUI\Ai\Credentials\Credentials;
@@ -23,6 +24,7 @@ use ArtisanPackUI\Ai\Exceptions\MissingCredentialsException;
 use ArtisanPackUI\Ai\Repositories\AiUsageRepository;
 use ArtisanPackUI\Ai\Support\BudgetSettings;
 use ArtisanPackUI\Ai\Support\FeatureSettings;
+use ArtisanPackUI\Ai\Testing\AiFake;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
@@ -389,6 +391,10 @@ abstract class ArtisanPackAgent
     /**
      * Execute the agent and return validated output.
      *
+     * When a test-double is installed via {@see Ai::fake()}
+     * the whole pipeline is skipped: the run is recorded and a queued
+     * deterministic response is returned (see {@see AiFake::handle()}).
+     *
      * The default pipeline is:
      *
      *   1. Reject if the feature is disabled.
@@ -407,6 +413,15 @@ abstract class ArtisanPackAgent
     {
         /** @var Container $container */
         $container = app();
+
+        // When a test-double is installed via `Ai::fake()`, hand the run to
+        // it: the fake records the invocation and returns a deterministic
+        // response instead of resolving credentials or calling a provider.
+        $fake = $this->activeFake( $container );
+
+        if ( $fake instanceof AiFake ) {
+            return $fake->handle( $this, $this->input );
+        }
 
         /** @var FeatureRegistry $registry */
         $registry = $container->make( FeatureRegistry::class );
@@ -513,6 +528,29 @@ abstract class ArtisanPackAgent
         }
 
         return $this->instructions();
+    }
+
+    /**
+     * Resolve the active `Ai::fake()` test-double, if one is installed.
+     *
+     * Returns null in production and in tests that don't fake, so the real
+     * pipeline runs unchanged.
+     *
+     * @since 1.2.0
+     *
+     * @param  Container  $container  Service container.
+     *
+     * @return AiFake|null
+     */
+    protected function activeFake( Container $container ): ?AiFake
+    {
+        if ( ! $container->bound( 'artisanpack.ai' ) ) {
+            return null;
+        }
+
+        $ai = $container->make( 'artisanpack.ai' );
+
+        return $ai instanceof Ai ? $ai->getFake() : null;
     }
 
     /**
