@@ -17,8 +17,11 @@ use ArtisanPackUI\Ai\Contracts\CredentialResolver;
 use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
 use ArtisanPackUI\Ai\Credentials\Credentials;
 use ArtisanPackUI\Ai\Events\AgentUsageRecorded;
+use ArtisanPackUI\Ai\Exceptions\BudgetExceededException;
 use ArtisanPackUI\Ai\Exceptions\FeatureDisabledException;
 use ArtisanPackUI\Ai\Exceptions\MissingCredentialsException;
+use ArtisanPackUI\Ai\Repositories\AiUsageRepository;
+use ArtisanPackUI\Ai\Support\BudgetSettings;
 use ArtisanPackUI\Ai\Support\FeatureSettings;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
@@ -34,7 +37,8 @@ use Stringable;
  * The public surface below is **frozen for v1.x** and must not change
  * without a major version bump:
  *
- *   - Public properties: `$featureKey`, `$package`, `$defaultModel`
+ *   - Public properties: `$featureKey`, `$package`, `$defaultModel`,
+ *     `$critical` (added 1.2.0)
  *   - Abstract methods: `instructions()`, `outputSchema()`
  *   - Static factory: `self::for( $input )`
  *   - Public entry point: `run(): array`
@@ -97,6 +101,23 @@ abstract class ArtisanPackAgent
      * @var bool
      */
     public bool $cacheable = true;
+
+    /**
+     * Whether this agent is safety-critical and may bypass the hard budget
+     * cap.
+     *
+     * When `artisanpack.ai.budget.enforce_hard_cap` is enabled and month-to-
+     * date spend has reached the configured monthly cap, non-critical agents
+     * are stopped with a {@see BudgetExceededException}. Subclasses that must
+     * keep running past the cap — spam detection, moderation, and other
+     * safety agents — set this to `true`; those runs are allowed through and
+     * log a warning line instead of throwing.
+     *
+     * @since 1.2.0
+     *
+     * @var bool
+     */
+    public bool $critical = false;
 
     /**
      * Per-agent cache TTL override in seconds.
@@ -374,8 +395,9 @@ abstract class ArtisanPackAgent
      *   2. Resolve credentials, rejecting when none are configured.
      *   3. Resolve model (runtime → per-feature config → `$defaultModel`).
      *   4. Serve from cache if `cache.enabled` and a hit exists.
-     *   5. Delegate to `execute()` and validate the shape.
-     *   6. Dispatch `AgentUsageRecorded` with token telemetry.
+     *   5. Enforce the monthly hard budget cap (unless `$critical`).
+     *   6. Delegate to `execute()` and validate the shape.
+     *   7. Dispatch `AgentUsageRecorded` with token telemetry.
      *
      * @since 1.0.0
      *
@@ -425,6 +447,8 @@ abstract class ArtisanPackAgent
                 return $cached;
             }
         }
+
+        $this->guardBudget( $container );
 
         $result = $this->execute( $credentials, $model, $instructions );
 
@@ -546,6 +570,65 @@ abstract class ArtisanPackAgent
         throw new LogicException(
             sprintf( 'Agent %s must override execute() to talk to laravel/ai.', static::class ),
         );
+    }
+
+    /**
+     * Enforce the monthly hard budget cap before a paid provider call.
+     *
+     * No-op unless `artisanpack.ai.budget.enforce_hard_cap` is enabled and a
+     * positive monthly cap is configured. When month-to-date spend has
+     * reached the cap, non-critical agents are stopped with a
+     * {@see BudgetExceededException}; agents flagged `$critical = true` are
+     * allowed through and log a warning line so safety-critical work keeps
+     * running past the cap.
+     *
+     * Called from `run()` only after a cache miss — cache hits cost nothing
+     * and are served before this guard runs.
+     *
+     * @since 1.2.0
+     *
+     * @param  Container  $container  Service container.
+     *
+     * @throws BudgetExceededException When over cap and the agent is not critical.
+     *
+     * @return void
+     */
+    protected function guardBudget( Container $container ): void
+    {
+        /** @var ConfigRepository $config */
+        $config = $container->make( ConfigRepository::class );
+
+        if ( ! (bool) $config->get( 'artisanpack.ai.budget.enforce_hard_cap', false ) ) {
+            return;
+        }
+
+        $cap = $container->make( BudgetSettings::class )->monthlyCap();
+
+        if ( null === $cap || $cap <= 0.0 ) {
+            return;
+        }
+
+        $spent = $container->make( AiUsageRepository::class )->monthToDateCost();
+
+        if ( $spent < $cap ) {
+            return;
+        }
+
+        if ( $this->critical ) {
+            $container->make( 'log' )->warning(
+                'AI budget cap exceeded; critical agent bypassing hard cap.',
+                [
+                    'feature_key' => $this->featureKey,
+                    'package'     => $this->package,
+                    'spent_usd'   => $spent,
+                    'cap_usd'     => $cap,
+                ],
+            );
+
+            return;
+        }
+
+        throw BudgetExceededException::forFeature( $this->featureKey, $spent, $cap );
     }
 
     /**

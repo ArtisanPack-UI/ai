@@ -133,9 +133,10 @@ $post->update( [ 'meta_description' => $suggestion['meta_description'] ] );
 1. Feature gate check (skips + throws `FeatureDisabledException` when the toggle is off)
 2. Credential resolution via the shared `CredentialResolver`
 3. Cache lookup (SHA-256 of `(feature_key, model, input)` → cached JSON)
-4. `execute()` — your `prompt()` call
-5. `recordUsage()` — fires `AgentUsageRecorded` for the usage dashboard + budget accounting
-6. Cache store on success
+4. Hard budget-cap guard — when `artisanpack.ai.budget.enforce_hard_cap` is on and month-to-date spend has reached the monthly cap, throws `BudgetExceededException` before the provider call. Cache hits (step 3) are served regardless; `$critical = true` agents bypass this and log a warning instead. Off by default.
+5. `execute()` — your `prompt()` call
+6. `recordUsage()` — fires `AgentUsageRecorded` for the usage dashboard + budget accounting
+7. Cache store on success
 
 If you need to bypass the pipeline for a specific call — e.g. dry-running the prompt in a test — call `execute()` directly.
 
@@ -157,7 +158,7 @@ The base class handles the following automatically. Don't reimplement them in yo
 - Deciding whether the feature is enabled (`isEnabled()` runs before `execute()`).
 - Emitting the `AgentUsageRecorded` event.
 - Applying per-feature model overrides (`config('artisanpack.ai.features.<key>.model')` and the admin's advanced-tab override both slot in through `resolveModel()`).
-- Enforcing the monthly cost cap (checked before the provider call in `run()`).
+- Enforcing the monthly cost cap (checked before the provider call in `run()`). Flag a safety-critical agent with `public bool $critical = true;` so it keeps running past the cap — the run is allowed through and a warning line is logged instead of throwing `BudgetExceededException`. Only takes effect when `artisanpack.ai.budget.enforce_hard_cap` is enabled.
 
 ## Convention notes
 

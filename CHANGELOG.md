@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Hard budget-cap enforcement with a critical-agent bypass. When `artisanpack.ai.budget.enforce_hard_cap` is enabled (off by default) and month-to-date spend reaches the configured monthly cap, `ArtisanPackAgent::run()` throws a new `BudgetExceededException` before making the paid provider call — cache hits still serve, since they cost nothing. Agents that set the new `public bool $critical = true;` surface member bypass the cap and log a warning line instead, so safety-critical work (spam detection, moderation) keeps running past the cap. This makes the "monthly cost cap enforced in `run()`" behaviour the authoring-agents guide already documented actually hold.
 - Tool passthrough for agents. `ArtisanPackAgent::withTools()` registers laravel/ai tool classes/instances for the next run, forwarded through `AgentPrompter::prompt()` into the underlying agent so host-app-registered tools (e.g. Keystone's read-tool registry) flow through the pipeline. Tools reset per run alongside the other run-scoped fields.
 - New `ap.ai.registerTools` filter hook, applied inside `LaravelAiAgentPrompter` once per prompt. The uniform seam a host app hangs its tool registry off of so registered tools reach every agent without each agent opting in. Signature: `(array $tools, array $context)`.
 
