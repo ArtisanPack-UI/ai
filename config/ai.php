@@ -116,12 +116,12 @@ return [
     'pricing' => [
 
         'anthropic' => [
-            'claude-3-5-haiku'  => [ 'input_per_1k' => 0.0008, 'output_per_1k' => 0.004 ],
-            'claude-3-5-sonnet' => [ 'input_per_1k' => 0.003,  'output_per_1k' => 0.015 ],
-            'claude-3-opus'     => [ 'input_per_1k' => 0.015,  'output_per_1k' => 0.075 ],
-            'haiku'             => [ 'input_per_1k' => 0.0008, 'output_per_1k' => 0.004 ],
-            'sonnet'            => [ 'input_per_1k' => 0.003,  'output_per_1k' => 0.015 ],
-            'opus'              => [ 'input_per_1k' => 0.015,  'output_per_1k' => 0.075 ],
+            'claude-haiku-4-5' => [ 'input_per_1k' => 0.001, 'output_per_1k' => 0.005 ],
+            'claude-sonnet-5'  => [ 'input_per_1k' => 0.002, 'output_per_1k' => 0.010 ],
+            'claude-opus-5'    => [ 'input_per_1k' => 0.005, 'output_per_1k' => 0.025 ],
+            'haiku'            => [ 'input_per_1k' => 0.001, 'output_per_1k' => 0.005 ],
+            'sonnet'           => [ 'input_per_1k' => 0.002, 'output_per_1k' => 0.010 ],
+            'opus'             => [ 'input_per_1k' => 0.005, 'output_per_1k' => 0.025 ],
         ],
 
         'openai' => [

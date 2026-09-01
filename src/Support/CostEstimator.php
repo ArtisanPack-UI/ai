@@ -79,7 +79,7 @@ final class CostEstimator
      * Look up the pricing entry for a provider/model.
      *
      * Uses literal array-key lookups to preserve dot-notation model names
-     * (e.g. `claude-3.5-sonnet`).
+     * (e.g. `claude-sonnet-5`).
      *
      * @since 1.0.0
      *
