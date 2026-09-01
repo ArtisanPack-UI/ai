@@ -90,11 +90,19 @@ return [
     | Recipients receive the `BudgetWarningMail` at most once per calendar
     | month.
     |
+    | When `enforce_hard_cap` is enabled, agents are additionally blocked
+    | from making paid provider calls once month-to-date spend reaches the
+    | cap — a `BudgetExceededException` is thrown before `execute()`. Agents
+    | that set `$critical = true` bypass the hard cap and log a warning line
+    | instead, so safety-critical work (spam detection, moderation) keeps
+    | running. Cache hits cost nothing and are always served. Off by default.
+    |
     */
 
     'budget' => [
         'warning_percentage' => (float) env( 'ARTISANPACK_AI_BUDGET_WARNING_PERCENTAGE', 80 ),
         'monthly_usd'        => env( 'ARTISANPACK_AI_BUDGET_MONTHLY_USD' ),
+        'enforce_hard_cap'   => (bool) env( 'ARTISANPACK_AI_BUDGET_ENFORCE_HARD_CAP', false ),
         'recipients'         => array_values( array_filter( array_map(
             'trim',
             explode( ',', (string) env( 'ARTISANPACK_AI_BUDGET_RECIPIENTS', '' ) ),
