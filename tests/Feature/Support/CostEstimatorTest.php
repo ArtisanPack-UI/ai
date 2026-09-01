@@ -12,8 +12,8 @@ it( 'prices the current-generation anthropic default models', function ( string 
     expect( $estimator->estimate( 'anthropic', $model, 1000, 1000 ) )->toBe( $expected );
 } )->with( [
     'claude-haiku-4-5' => [ 'claude-haiku-4-5', 0.006 ],
-    'claude-sonnet-5'  => [ 'claude-sonnet-5', 0.018 ],
-    'claude-opus-5'    => [ 'claude-opus-5', 0.09 ],
+    'claude-sonnet-5'  => [ 'claude-sonnet-5', 0.012 ],
+    'claude-opus-5'    => [ 'claude-opus-5', 0.03 ],
 ] );
 
 it( 'no longer ships pricing for the retired 3.x-family models', function ( string $model ): void {
