@@ -15,7 +15,7 @@ Every agent extends `ArtisanPackUI\Ai\Agents\ArtisanPackAgent`. The five surface
 ```php
 public string $featureKey;     // e.g. 'seo.suggest_meta_description'
 public string $package;        // e.g. 'artisanpack-ui/seo'
-public string $defaultModel;   // e.g. 'claude-3-5-haiku-latest'
+public string $defaultModel;   // e.g. 'claude-haiku-4-5'
 
 public function instructions(): string;
 public function outputSchema(): array;
@@ -37,7 +37,7 @@ class MetaDescriptionAgent extends ArtisanPackAgent
 
     public string $featureKey   = 'seo.suggest_meta_description';
     public string $package      = 'artisanpack-ui/seo';
-    public string $defaultModel = 'claude-3-5-haiku-latest';
+    public string $defaultModel = 'claude-haiku-4-5';
 
     public function instructions(): string
     {

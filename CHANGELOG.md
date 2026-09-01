@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Moved the default Anthropic pricing table off the retired Claude 3.5 family. `claude-3-5-haiku`, `claude-3-5-sonnet`, and `claude-3-opus` are replaced by `claude-haiku-4-5` (cheap utility agents), `claude-sonnet-5` (assistant + long-form), and `claude-opus-5` (premium). The bare `haiku`/`sonnet`/`opus` aliases are retained and repriced to match. BYOK and authoring-agents docs now recommend the current-generation model ids. Host apps can still override defaults per-feature without upstream changes.
+
 ## [1.1.0] - 2026-07-21
 
 ### Added

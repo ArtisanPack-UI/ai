@@ -144,7 +144,7 @@ it( 'rejects a silent provider switch that would rebind the stored key', functio
     $this->actingAs( apiActingAsAdmin() )
         ->putJson( '/api/artisanpack-ai/settings', [
             'provider'      => 'anthropic',
-            'default_model' => 'claude-3-5-sonnet',
+            'default_model' => 'claude-sonnet-5',
         ] )
         ->assertStatus( 422 )
         ->assertJsonValidationErrors( [ 'api_key' ] );

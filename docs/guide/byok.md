@@ -22,7 +22,7 @@ Suitable when only a single fixed provider is needed and credentials rotate via 
 
 ```env
 ARTISANPACK_AI_PROVIDER=anthropic
-ARTISANPACK_AI_DEFAULT_MODEL=claude-3-5-haiku-latest
+ARTISANPACK_AI_DEFAULT_MODEL=claude-haiku-4-5
 
 ANTHROPIC_API_KEY=sk-ant-…
 OPENAI_API_KEY=sk-…
@@ -67,7 +67,7 @@ Prompts for the new provider/key/model and updates the encrypted row in place. C
 
 - Sign up: <https://console.anthropic.com/>
 - Env var: `ANTHROPIC_API_KEY`
-- Recommended models: `claude-3-5-haiku-latest` (cheap), `claude-3-5-sonnet-latest` (default), `claude-opus-4-latest` (premium).
+- Recommended models: `claude-haiku-4-5` (cheap utility agents), `claude-sonnet-5` (assistant + long-form), `claude-opus-5` (premium).
 - Connection test: `GET https://api.anthropic.com/v1/models` with the key attached.
 - Streaming: fully supported via `withStreaming()` on the agent.
 
