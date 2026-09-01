@@ -149,6 +149,7 @@ PROMPT;
             instructions: $instructions,
             message: $this->buildMessage( $normalized ),
             outputSchema: $this->outputSchema(),
+            tools: $this->tools(),
         );
 
         return [

@@ -57,6 +57,7 @@ class LaravelAiAgentPrompter implements AgentPrompter
         string $instructions,
         string|array $message,
         array $outputSchema,
+        array $tools = [],
     ): array {
         [ $prompt, $attachments ] = $this->normalizeMessage( $message );
 
@@ -70,6 +71,8 @@ class LaravelAiAgentPrompter implements AgentPrompter
             'instructions' => $instructions,
             'attachments'  => count( $attachments ),
         ];
+
+        $tools = $this->resolveTools( $tools, $context );
 
         /**
          * Filter the prompt string before it is sent to the model.
@@ -93,12 +96,7 @@ class LaravelAiAgentPrompter implements AgentPrompter
         // touches) through `serialize()`.
         $schemaProperties = $this->buildLaravelJsonSchema( $outputSchema );
 
-        $agent = new StructuredAnonymousAgent(
-            instructions: $instructions,
-            messages: [],
-            tools: [],
-            schema: static fn () => $schemaProperties,
-        );
+        $agent = $this->buildAgent( $instructions, $schemaProperties, $tools );
 
         $providerName = $this->registerRuntimeProvider( $credentials );
 
@@ -140,6 +138,70 @@ class LaravelAiAgentPrompter implements AgentPrompter
             'input_tokens'  => $response->usage->promptTokens,
             'output_tokens' => $response->usage->completionTokens,
         ];
+    }
+
+    /**
+     * Merge the caller-supplied tools with any tools contributed by the
+     * host app's registry, then hand back the flat list to expose to the
+     * model.
+     *
+     * The filter is the seam host apps (e.g. Keystone's read-tool registry)
+     * hang their tool classes off of so registered tools flow through every
+     * agent without each agent opting in. Tools passed explicitly by the
+     * calling agent are placed first; the filter receives them and may
+     * append, prepend, or replace. A non-array filter return is ignored so a
+     * misbehaving listener can't blow up the whole request.
+     *
+     * @since 1.2.0
+     *
+     * @param  array<int, mixed>     $tools    Caller-supplied tool classes/instances.
+     * @param  array<string, mixed>  $context  Provider, model, instructions, attachment count.
+     *
+     * @return array<int, mixed>
+     */
+    protected function resolveTools( array $tools, array $context ): array
+    {
+        /**
+         * Filter the list of tools exposed to the model for this run.
+         *
+         * The uniform seam for a host-app tool registry — register read
+         * tools here and they flow through every agent's pipeline. Runs
+         * once per prompt, after the calling agent's own tools are seeded.
+         *
+         * @hook  ap.ai.registerTools
+         *
+         * @since 1.2.0
+         *
+         * @param array<int, mixed>    $tools    Tools seeded by the calling agent.
+         * @param array<string, mixed> $context  Provider, model, instructions, attachment count.
+         */
+        $resolved = applyFilters( 'ap.ai.registerTools', $tools, $context );
+
+        return is_array( $resolved ) ? array_values( $resolved ) : $tools;
+    }
+
+    /**
+     * Construct the structured anonymous agent for a run.
+     *
+     * Extracted so the tool/schema wiring is exercised in isolation and a
+     * future refactor can't silently drop registered tools on the floor.
+     *
+     * @since 1.2.0
+     *
+     * @param  string                                          $instructions      Resolved system prompt.
+     * @param  array<string, \Illuminate\JsonSchema\Types\Type>  $schemaProperties  Built schema map.
+     * @param  array<int, mixed>                               $tools             Resolved tool list.
+     *
+     * @return StructuredAnonymousAgent
+     */
+    protected function buildAgent( string $instructions, array $schemaProperties, array $tools ): StructuredAnonymousAgent
+    {
+        return new StructuredAnonymousAgent(
+            instructions: $instructions,
+            messages: [],
+            tools: $tools,
+            schema: static fn () => $schemaProperties,
+        );
     }
 
     /**

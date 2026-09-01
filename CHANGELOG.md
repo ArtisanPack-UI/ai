@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Tool passthrough for agents. `ArtisanPackAgent::withTools()` registers laravel/ai tool classes/instances for the next run, forwarded through `AgentPrompter::prompt()` into the underlying agent so host-app-registered tools (e.g. Keystone's read-tool registry) flow through the pipeline. Tools reset per run alongside the other run-scoped fields.
+- New `ap.ai.registerTools` filter hook, applied inside `LaravelAiAgentPrompter` once per prompt. The uniform seam a host app hangs its tool registry off of so registered tools reach every agent without each agent opting in. Signature: `(array $tools, array $context)`.
+
 ### Changed
 
+- Bumped `laravel/ai` to `^0.11.0` (was `^0.8`). This exposes the human-in-the-loop tool approval surface (`Approvable`, `Decisions`, and the `tool_approval_request` streaming event) added upstream in v0.10.0, alongside the conversation-persistence concerns (`RemembersConversations` / `HasConversations` / `continue()`) that were already present. Downstream agents opt into conversations and approval via laravel/ai's own traits; the wrapper's default structured path is unchanged apart from the new tool passthrough. A new upstream-capabilities test guards these features so a future constraint relaxation fails loudly.
 - Moved the default Anthropic pricing table off the retired Claude 3.x family (Claude 3.5 Haiku/Sonnet and Claude 3 Opus). `claude-3-5-haiku`, `claude-3-5-sonnet`, and `claude-3-opus` are replaced by `claude-haiku-4-5` (cheap utility agents), `claude-sonnet-5` (assistant + long-form), and `claude-opus-5` (premium). The bare `haiku`/`sonnet`/`opus` aliases are retained and repriced to match. BYOK and authoring-agents docs now recommend the current-generation model ids. Host apps can still override defaults per-feature without upstream changes.
 
 ## [1.1.0] - 2026-07-21

@@ -38,7 +38,8 @@ use Stringable;
  *   - Abstract methods: `instructions()`, `outputSchema()`
  *   - Static factory: `self::for( $input )`
  *   - Public entry point: `run(): array`
- *   - Fluent overrides: `withCredentials()`, `withModel()`, `withStreaming()`
+ *   - Fluent overrides: `withCredentials()`, `withModel()`, `withStreaming()`,
+ *     `withTools()` (added 1.2.0)
  *   - Cache-key hook: `cacheFingerprint()`
  *
  * Subclasses implement `instructions()` and `outputSchema()` and, if the
@@ -149,6 +150,20 @@ abstract class ArtisanPackAgent
     protected ?string $modelOverride = null;
 
     /**
+     * laravel/ai tool classes/instances to expose to the model for the next
+     * run.
+     *
+     * Populated via {@see withTools()} and forwarded through the prompter so
+     * host-app-registered tools (e.g. Keystone's read-tool registry) flow
+     * through the agent pipeline. Reset per run in {@see for()}.
+     *
+     * @since 1.2.0
+     *
+     * @var array<int, mixed>
+     */
+    protected array $tools = [];
+
+    /**
      * Whether the run should stream chunks instead of returning a full
      * result.
      *
@@ -211,6 +226,7 @@ abstract class ArtisanPackAgent
         $agent->streamCallback     = null;
         $agent->credentialOverride = null;
         $agent->modelOverride      = null;
+        $agent->tools              = [];
 
         return $agent;
     }
@@ -245,6 +261,43 @@ abstract class ArtisanPackAgent
         $this->modelOverride = $model;
 
         return $this;
+    }
+
+    /**
+     * Set the laravel/ai tools exposed to the model for the next run.
+     *
+     * Replaces any previously set tools (call once with the full list). The
+     * tools are forwarded through the prompter into the underlying agent so
+     * host-app-registered tool classes flow through the pipeline. Subclasses
+     * that override `execute()` should pass `$this->tools()` into their
+     * prompter call — the shipped agents already do.
+     *
+     * @since 1.2.0
+     *
+     * @param  array<int, mixed>  $tools  laravel/ai tool classes/instances.
+     *
+     * @return static
+     */
+    public function withTools( array $tools ): static
+    {
+        $this->tools = array_values( $tools );
+
+        return $this;
+    }
+
+    /**
+     * Return the tools registered for the next run.
+     *
+     * Exposed so `execute()` overrides (and transport wrappers) can forward
+     * the resolved tool list into the prompter.
+     *
+     * @since 1.2.0
+     *
+     * @return array<int, mixed>
+     */
+    public function tools(): array
+    {
+        return $this->tools;
     }
 
     /**

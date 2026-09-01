@@ -96,7 +96,7 @@ Every call to `MetaDescriptionAgent::for( $post )` — inside the SEO package's 
 
 - The base class's `execute()` throws a `LogicException` by default. Subclasses that talk to a provider must override it (or `use \Laravel\Ai\Promptable;` and call `$this->prompt(...)`).
 - The `run()` pipeline (feature gate → credential resolution → cache → execute → telemetry) is not part of the frozen contract in the same way. If you need to change it, override `run()` directly — but be aware you may lose usage tracking or budget accounting if you skip `recordUsage()`.
-- Runtime tweaks that only apply for a single call don't need a binding. Use `withCredentials()`, `withModel()`, `withStreaming()`, or `streamTo()` on the agent instance.
+- Runtime tweaks that only apply for a single call don't need a binding. Use `withCredentials()`, `withModel()`, `withStreaming()`, `withTools()`, or `streamTo()` on the agent instance.
 - Container bindings compose with the `ap.ai.registerFeatures` hook — if you want the registry to point at your subclass too, register `[ 'agent' => OpusMetaDescriptionAgent::class ]` there or in a `aiFeatures()` provider method.
 
 ## Cross-cutting hooks: `ap.ai.promptGenerated` and `ap.ai.responseReceived`
@@ -121,3 +121,37 @@ addAction( 'ap.ai.responseReceived', function ( string $response, array $context
 ```
 
 Because the hooks fire inside the shared prompter, listeners cover every agent — first-party, downstream package, and app subclass — without touching individual call sites.
+
+## Tools, conversations, and human approval
+
+The wrapper is built on `laravel/ai`, which owns three capabilities host apps build assistants on top of: **tool calling**, **conversation persistence**, and **human-in-the-loop tool approval**. `artisanpack-ui/ai` pins `laravel/ai ^0.11.0`, so all three are available to downstream agents.
+
+### Tool passthrough
+
+Register tools for a run with `withTools()` and they flow through the prompter into the underlying agent:
+
+```php
+$result = MyAgent::for( $input )
+    ->withTools( [ ReadPostTool::class, ReadPageTool::class ] )
+    ->run();
+```
+
+The tools are laravel/ai tool classes/instances — see the [laravel/ai tools docs](https://laravel.com/docs/ai). Tools reset per run, so a container-singleton agent binding never leaks one run's tools into the next.
+
+To register tools that apply to **every** agent — a host-app read-tool registry, for example — hang them off the `ap.ai.registerTools` filter instead of calling `withTools()` on each agent:
+
+```php
+use function ArtisanPackUI\Hooks\addFilter;
+
+addFilter( 'ap.ai.registerTools', function ( array $tools, array $context ) {
+    $tools[] = ReadPostTool::class;
+
+    return $tools;
+} );
+```
+
+The filter runs once per prompt, after the calling agent's own tools are seeded, and receives the same `$context` (provider, model, instructions, attachment count) as the other prompter hooks.
+
+### Conversations and approval
+
+Conversation persistence (`RemembersConversations` / `HasConversations` / `continue()`) and human tool approval (`Approvable`, `Decisions`, the `tool_approval_request` streaming event) are laravel/ai features an agent opts into with laravel/ai's own traits and contracts. The wrapper's default structured path does not enable them — override `execute()` (or `use \Laravel\Ai\Promptable;` and drive the agent directly) when a feature needs stored conversations or an approval gate. See the [laravel/ai documentation](https://laravel.com/docs/ai) for the trait and contract details.

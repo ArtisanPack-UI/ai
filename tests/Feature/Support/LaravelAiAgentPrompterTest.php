@@ -8,6 +8,7 @@ use Illuminate\JsonSchema\Types\Type;
 use Laravel\Ai\Files\Base64Image;
 use Laravel\Ai\Files\LocalImage;
 use Laravel\Ai\Files\RemoteImage;
+use Laravel\Ai\StructuredAnonymousAgent;
 
 /**
  * Isolated tests for the seams inside {@see LaravelAiAgentPrompter} — the
@@ -235,4 +236,42 @@ it( 'sanitises a hostile provider driver so the config key stays a safe identifi
     expect( $name )->not->toContain( '.' );
     expect( $name )->not->toContain( '/' );
     expect( $name )->toStartWith( 'artisanpack_ai_runtime_evil_driver_here_' );
+} );
+
+it( 'forwards resolved tools onto the structured agent it builds', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    $agent = invoke_prompter( $prompter, 'buildAgent', 'Do the thing.', [], [ 'App\\Tools\\ReadPost' ] );
+
+    expect( $agent )->toBeInstanceOf( StructuredAnonymousAgent::class );
+    expect( $agent->tools )->toBe( [ 'App\\Tools\\ReadPost' ] );
+    expect( $agent->instructions )->toBe( 'Do the thing.' );
+} );
+
+it( 'passes tools through the ap.ai.registerTools filter so a host registry can contribute', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    addFilter( 'ap.ai.registerTools', function ( array $tools ): array {
+        $tools[] = 'App\\Tools\\HostRegistered';
+
+        return $tools;
+    } );
+
+    $resolved = invoke_prompter( $prompter, 'resolveTools', [ 'App\\Tools\\FromAgent' ], [] );
+
+    expect( $resolved )->toBe( [ 'App\\Tools\\FromAgent', 'App\\Tools\\HostRegistered' ] );
+
+    removeAllFilters( 'ap.ai.registerTools' );
+} );
+
+it( 'ignores a non-array return from the ap.ai.registerTools filter', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    addFilter( 'ap.ai.registerTools', fn (): string => 'not-an-array' );
+
+    $resolved = invoke_prompter( $prompter, 'resolveTools', [ 'App\\Tools\\FromAgent' ], [] );
+
+    expect( $resolved )->toBe( [ 'App\\Tools\\FromAgent' ] );
+
+    removeAllFilters( 'ap.ai.registerTools' );
 } );
