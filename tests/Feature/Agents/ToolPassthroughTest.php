@@ -7,6 +7,7 @@ use ArtisanPackUI\Ai\Contracts\AgentPrompter;
 use ArtisanPackUI\Ai\Contracts\CredentialResolver;
 use ArtisanPackUI\Ai\Credentials\ChainedCredentialResolver;
 use ArtisanPackUI\Ai\Credentials\Credentials;
+use Laravel\Ai\Tools\SimilaritySearch;
 use Tests\Support\FakeAgentPrompter;
 
 /**
@@ -14,6 +15,11 @@ use Tests\Support\FakeAgentPrompter;
  * (#52): tools registered on an agent via `withTools()` must reach the
  * prompter, and must reset between runs so a container-singleton agent can't
  * leak run N-1's tools into run N.
+ *
+ * The final case pins the RAG retrieval path Keystone's Phase 2 depends on
+ * (§8.6, #54): laravel/ai's `SimilaritySearch` tool is a plain laravel/ai
+ * tool, so it rides the same `withTools()` seam through to the model without
+ * the wrapper needing a bespoke embeddings/vector-store surface.
  */
 
 beforeEach( function (): void {
@@ -73,4 +79,17 @@ it( 'resets tools between runs so a reused agent binding cannot leak them', func
 
     expect( $this->prompter->calls[0]['tools'] )->toBe( [ 'App\\Tools\\ReadPost' ] );
     expect( $this->prompter->calls[1]['tools'] )->toBe( [] );
+} );
+
+it( 'forwards a laravel/ai SimilaritySearch tool through the seam for RAG retrieval', function (): void {
+    $this->prompter->queue( [ 'summary' => 'x', 'key_points' => [], 'caveats' => [] ] );
+
+    $retrieval = SimilaritySearch::usingModel( 'App\\Models\\SiteContent', 'embedding' );
+
+    SummarizationAgent::for( [ 'items' => [ 'a' ] ] )
+        ->withTools( [ $retrieval ] )
+        ->run();
+
+    expect( $this->prompter->calls[0]['tools'] )->toBe( [ $retrieval ] );
+    expect( $this->prompter->calls[0]['tools'][0] )->toBeInstanceOf( SimilaritySearch::class );
 } );

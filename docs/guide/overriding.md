@@ -155,3 +155,33 @@ The filter runs once per prompt, after the calling agent's own tools are seeded,
 ### Conversations and approval
 
 Conversation persistence (`RemembersConversations` / `HasConversations` / `continue()`) and human tool approval (`Approvable`, `Decisions`, the `tool_approval_request` streaming event) are laravel/ai features an agent opts into with laravel/ai's own traits and contracts. The wrapper's default structured path does not enable them — override `execute()` (or `use \Laravel\Ai\Promptable;` and drive the agent directly) when a feature needs stored conversations or an approval gate. See the [laravel/ai documentation](https://laravel.com/docs/ai) for the trait and contract details.
+
+### Embeddings and vector stores for RAG
+
+Retrieval-augmented generation over your own content — embed documents, store the vectors, then retrieve the relevant ones at prompt time — is built entirely on laravel/ai's own embeddings and vector-store surface, all shipped in the pinned `^0.11.0`. The wrapper adds no bespoke embeddings API on top; there is nothing extra to route through, so use laravel/ai directly for indexing and storage:
+
+```php
+use Laravel\Ai\Embeddings;
+use Laravel\Ai\Stores;
+
+// Embed content for indexing.
+$response = Embeddings::for( [ $page->body ] )->generate();
+
+// Or manage a provider-backed vector store.
+$store = Stores::create( name: 'site-content' );
+$store->add( $document );
+```
+
+Retrieval flows back into an agent as an ordinary tool: laravel/ai's `SimilaritySearch` is a plain laravel/ai tool, so it rides the same [tool passthrough](#tool-passthrough) seam as any other — no separate wiring:
+
+```php
+use Laravel\Ai\Tools\SimilaritySearch;
+
+$result = MyAgent::for( $question )
+    ->withTools( [
+        SimilaritySearch::usingModel( SiteContent::class, 'embedding' ),
+    ] )
+    ->run();
+```
+
+The model exposes `withTools()` — or hang the retrieval tool off the `ap.ai.registerTools` filter to give every agent RAG retrieval at once. See the [laravel/ai documentation](https://laravel.com/docs/ai) for embeddings options, store providers, and the `whereVectorSimilarTo()` model scope `SimilaritySearch` queries against.
