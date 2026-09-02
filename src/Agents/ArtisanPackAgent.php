@@ -51,7 +51,7 @@ use Stringable;
  * Subclasses implement `instructions()` and `outputSchema()` and, if the
  * default `execute()` isn't sufficient, override `execute()` to talk to
  * `laravel/ai` directly. Downstream agents that want provider failover,
- * broadcast/queue dispatch, and `Ai::fake()` should also `use \Laravel\Ai\Promptable;`
+ * broadcast/queue dispatch, and laravel/ai's `\Laravel\Ai\Ai::fake()` should also `use \Laravel\Ai\Promptable;`
  * and call `$this->prompt(...)` / `$this->stream(...)` from their `execute()`.
  * The fluent toggle is named `withStreaming()` (not `stream()`) so it never
  * collides with the trait method.
@@ -241,7 +241,7 @@ abstract class ArtisanPackAgent
         $agent = app( static::class );
 
         // Reset every run-scoped field so a container-singleton binding
-        // (documented in docs/overriding-agents.md) or an Octane-cached
+        // (documented in docs/guide/overriding.md) or an Octane-cached
         // instance can't leak run N-1's callback, credentials, or model
         // override into run N.
         $agent->input              = $input;

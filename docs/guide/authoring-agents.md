@@ -142,11 +142,13 @@ If you need to bypass the pipeline for a specific call — e.g. dry-running the 
 
 ## Step 4: add per-agent tests
 
-Follow the pattern in `tests/Feature/Agents/`. At minimum:
+Follow the pattern in `tests/Feature/Agents/`. Bind `ArtisanPackUI\Ai\Testing\FakeAgentPrompter` over the `AgentPrompter` contract so the real pipeline runs against a canned provider response (see [[testing]]). At minimum:
 
-- One test that seeds credentials, runs the agent, and asserts the output schema shape.
+- One test that seeds credentials, queues a response on the fake prompter, runs the agent, and asserts the output schema shape.
 - One test that turns the feature off and asserts `FeatureDisabledException` is thrown.
 - One test that verifies `AgentUsageRecorded` is dispatched with the expected feature key + model.
+
+Code that *calls* your agent (controllers, Livewire components, jobs) should use `Ai::fake()` instead so it never depends on your agent's internals.
 
 The base class ships with the plumbing to make these easy — see `tests/Support/FakeAgent.php` for a minimal template.
 
@@ -154,8 +156,8 @@ The base class ships with the plumbing to make these easy — see `tests/Support
 
 The base class handles the following automatically. Don't reimplement them in your agent:
 
-- Reading the API key or provider from the store (use `$this->credentials` if you need to inspect the resolved credentials).
-- Deciding whether the feature is enabled (`isEnabled()` runs before `execute()`).
+- Reading the API key or provider from the store (the resolved `Credentials` are passed into `execute()` as its first argument).
+- Deciding whether the feature is enabled (`run()` checks `FeatureRegistry::isToggleOn()` before `execute()` and throws `FeatureDisabledException` when the toggle is off).
 - Emitting the `AgentUsageRecorded` event.
 - Applying per-feature model overrides (`config('artisanpack.ai.features.<key>.model')` and the admin's advanced-tab override both slot in through `resolveModel()`).
 - Enforcing the monthly cost cap (checked before the provider call in `run()`). Flag a safety-critical agent with `public bool $critical = true;` so it keeps running past the cap — the run is allowed through and a warning line is logged instead of throwing `BudgetExceededException`. Only takes effect when `artisanpack.ai.budget.enforce_hard_cap` is enabled.

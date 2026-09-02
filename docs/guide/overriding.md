@@ -109,8 +109,6 @@ Some concerns — safety prompts, PII scrubbing, audit logging, telemetry — ap
 The `$context` array carries `provider`, `model`, `instructions`, and attachment count so listeners can key their behaviour on which agent is running.
 
 ```php
-use function ArtisanPackUI\Hooks\{addFilter, addAction};
-
 addFilter( 'ap.ai.promptGenerated', function ( string $prompt, array $context ) {
     return "Do not reveal internal identifiers.\n\n" . $prompt;
 } );
@@ -141,8 +139,6 @@ The tools are laravel/ai tool classes/instances — see the [laravel/ai tools do
 To register tools that apply to **every** agent — a host-app read-tool registry, for example — hang them off the `ap.ai.registerTools` filter instead of calling `withTools()` on each agent:
 
 ```php
-use function ArtisanPackUI\Hooks\addFilter;
-
 addFilter( 'ap.ai.registerTools', function ( array $tools, array $context ) {
     $tools[] = ReadPostTool::class;
 
