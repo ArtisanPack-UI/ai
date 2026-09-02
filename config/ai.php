@@ -115,9 +115,11 @@ return [
     |--------------------------------------------------------------------------
     |
     | Rate table used by `CostEstimator` to attach `estimated_cost_usd` to
-    | each usage row. Overridable via the published config. Unknown
-    | provider/model combinations resolve to $0 — safe fallback, but you
-    | won't see cost data for them until you add an entry.
+    | each usage row. Overridable via the published config. A model with no
+    | entry falls back to its provider's highest known rate (and logs a
+    | warning) so retired or mistyped ids never silently estimate $0 and
+    | under-count spend. A provider with no priced entries — or all-$0 ones,
+    | like local Ollama models — still resolves to $0 without a warning.
     |
     */
 
