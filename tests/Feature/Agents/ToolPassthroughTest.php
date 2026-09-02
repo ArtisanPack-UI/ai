@@ -7,8 +7,8 @@ use ArtisanPackUI\Ai\Contracts\AgentPrompter;
 use ArtisanPackUI\Ai\Contracts\CredentialResolver;
 use ArtisanPackUI\Ai\Credentials\ChainedCredentialResolver;
 use ArtisanPackUI\Ai\Credentials\Credentials;
+use ArtisanPackUI\Ai\Testing\FakeAgentPrompter;
 use Laravel\Ai\Tools\SimilaritySearch;
-use Tests\Support\FakeAgentPrompter;
 
 /**
  * Guards the tool-passthrough seam added for Keystone's read-tool registry

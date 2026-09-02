@@ -8,7 +8,7 @@ use ArtisanPackUI\Ai\Contracts\CredentialResolver;
 use ArtisanPackUI\Ai\Credentials\ChainedCredentialResolver;
 use ArtisanPackUI\Ai\Credentials\Credentials;
 use ArtisanPackUI\Ai\Exceptions\FeatureError;
-use Tests\Support\FakeAgentPrompter;
+use ArtisanPackUI\Ai\Testing\FakeAgentPrompter;
 
 beforeEach( function (): void {
     /** @var ChainedCredentialResolver $resolver */
