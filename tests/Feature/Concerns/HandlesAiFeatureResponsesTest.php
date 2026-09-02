@@ -10,7 +10,9 @@ use ArtisanPackUI\Ai\Support\AiFeatureOutcome;
 use Illuminate\Support\Facades\Log;
 use Tests\Support\HandlesAiFeatureResponsesHost;
 
-it( 'wraps a successful agent call in a success outcome', function (): void {
+it( 'wraps a successful agent call in a success outcome and logs nothing', function (): void {
+    Log::spy();
+
     $outcome = ( new HandlesAiFeatureResponsesHost() )->run(
         'ai.summarize',
         fn (): array => [ 'summary' => 'done' ],
@@ -24,23 +26,20 @@ it( 'wraps a successful agent call in a success outcome', function (): void {
         ->and( $outcome->statusSlug )->toBe( 'success' )
         ->and( $outcome->errorCode )->toBeNull()
         ->and( $outcome->message )->toBeNull();
+
+    Log::shouldNotHaveReceived( 'error' );
 } );
 
-it( 'maps the four AI exception layers onto the normalized tuple', function (
-    string $type,
+it( 'maps each handled AI exception onto the normalized tuple, passing its message through', function (
+    Throwable $exception,
     int $status,
     string $errorCode,
     string $statusSlug,
+    string $message,
 ): void {
     $outcome = ( new HandlesAiFeatureResponsesHost() )->run(
         'ai.alt_text',
-        function () use ( $type ): void {
-            throw match ( $type ) {
-                'disabled'    => FeatureDisabledException::forFeature( 'ai.alt_text' ),
-                'credentials' => MissingCredentialsException::forFeature( 'ai.alt_text' ),
-                'feature'     => FeatureError::forFeature( 'ai.alt_text', 'unreadable image' ),
-            };
-        },
+        fn () => throw $exception,
     );
 
     expect( $outcome->succeeded )->toBeFalse()
@@ -48,25 +47,38 @@ it( 'maps the four AI exception layers onto the normalized tuple', function (
         ->and( $outcome->output )->toBeNull()
         ->and( $outcome->status )->toBe( $status )
         ->and( $outcome->errorCode )->toBe( $errorCode )
-        ->and( $outcome->statusSlug )->toBe( $statusSlug );
+        ->and( $outcome->statusSlug )->toBe( $statusSlug )
+        ->and( $outcome->message )->toBe( $message );
 } )->with( [
-    'feature disabled'     => [ 'disabled', 403, 'feature_disabled', 'disabled' ],
-    'missing credentials'  => [ 'credentials', 503, 'missing_credentials', 'missing-credentials' ],
-    'domain feature error' => [ 'feature', 422, 'invalid_input', 'invalid-input' ],
+    'feature disabled' => [
+        fn () => FeatureDisabledException::forFeature( 'ai.alt_text' ),
+        403,
+        'feature_disabled',
+        'disabled',
+        'AI feature "ai.alt_text" is disabled.',
+    ],
+    'missing credentials' => [
+        fn () => MissingCredentialsException::forFeature( 'ai.alt_text' ),
+        503,
+        'missing_credentials',
+        'missing-credentials',
+        'No AI credentials configured for feature "ai.alt_text".',
+    ],
+    'domain feature error' => [
+        fn () => FeatureError::forFeature( 'ai.alt_text', 'unreadable image' ),
+        422,
+        'invalid_input',
+        'invalid-input',
+        'AI feature "ai.alt_text" could not run: unreadable image',
+    ],
 ] );
-
-it( 'passes the domain exception message straight through on a handled failure', function (): void {
-    $outcome = ( new HandlesAiFeatureResponsesHost() )->run(
-        'ai.alt_text',
-        fn () => throw FeatureError::forFeature( 'ai.alt_text', 'unreadable image' ),
-    );
-
-    expect( $outcome->message )->toBe( 'AI feature "ai.alt_text" could not run: unreadable image' );
-} );
 
 it( 'maps any other throwable onto a generic internal error without leaking its message', function (): void {
     Log::spy();
 
+    // The agent runs as a closure, so a throw from anywhere in it — including
+    // a host-bound subclass's `for()` construction — is caught here rather
+    // than escaping the handler.
     $outcome = ( new HandlesAiFeatureResponsesHost() )->run(
         'ai.summarize',
         fn () => throw new RuntimeException( 'raw provider stack trace' ),
@@ -96,21 +108,6 @@ it( 'logs the raw error under the consumer log label in the fixed context shape'
                 && 'raw provider stack trace' === $context['error']
                 && [ 'feature', 'error' ] === array_keys( $context );
         } );
-} );
-
-it( 'runs agent construction inside the handler so a throwing factory is caught', function (): void {
-    Log::spy();
-
-    // A host that binds a subclass with unresolvable constructor deps makes
-    // `for()` itself a throw site. The callable defers construction into the
-    // try, so the failure becomes an internal_error rather than escaping.
-    $outcome = ( new HandlesAiFeatureResponsesHost() )->run(
-        'ai.alt_text',
-        fn () => throw new LogicException( 'container could not resolve bound agent' ),
-    );
-
-    expect( $outcome->succeeded )->toBeFalse()
-        ->and( $outcome->errorCode )->toBe( 'internal_error' );
 } );
 
 it( 'reports a feature enabled only when it is both registered and toggled on', function (): void {
