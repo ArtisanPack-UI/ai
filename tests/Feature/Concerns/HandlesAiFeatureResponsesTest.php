@@ -75,7 +75,7 @@ it( 'maps each handled AI exception onto the normalized tuple, passing its messa
 ] );
 
 it( 'maps a budget-exceeded stop onto a clean 429 without leaking the spend or logging an error', function (): void {
-    Log::spy();
+    $log = Log::spy();
 
     $outcome = ( new HandlesAiFeatureResponsesHost() )->run(
         'ai.alt_text',
@@ -92,7 +92,7 @@ it( 'maps a budget-exceeded stop onto a clean 429 without leaking the spend or l
         ->and( $outcome->message )->not->toContain( '120' )
         ->and( $outcome->message )->not->toContain( '100' );
 
-    Log::shouldNotHaveReceived( 'error' );
+    $log->shouldNotHaveReceived( 'error' );
 } );
 
 it( 'maps any other throwable onto a generic internal error without leaking its message', function (): void {
