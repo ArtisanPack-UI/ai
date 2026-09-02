@@ -12,6 +12,8 @@ See the [AI RFC](https://github.com/ArtisanPack-UI/.github/discussions/8) for de
 - A **credential store** — bring your own key via `.env` or the admin UI, encrypted at rest, resolved through a single `CredentialResolver` contract.
 - A **cost + usage layer** — per-agent event stream, monthly budget cap, dashboard aggregations, budget-warning email.
 - A **provider-agnostic agent base class** — subclass, declare a feature key + output schema, get caching, telemetry, and streaming for free.
+- **Shared trigger-surface plumbing** — one exception ladder (`HandlesAiFeatureResponses`) and two Livewire concerns (`ChecksFeatureToggle`, `InteractsWithAiFeature`) so every controller and component maps AI failures the same way.
+- **Test doubles** — `Ai::fake()` for scripted agent output and `FakeAgentPrompter` for canned provider responses, both shipped from `src/Testing`.
 - **Livewire admin surfaces** — Settings page, Usage dashboard, Per-feature toggles page.
 - **JSON API endpoints** — REST parity for React and Vue starter kits (see [docs/reference/api-schema.json](docs/reference/api-schema.json)).
 - **Ollama support** — every shipped agent works against a self-hosted local model, not just the cloud providers.
@@ -66,6 +68,8 @@ Start at [docs/home.md](docs/home.md) for the full documentation index. Direct l
 - **[Built-in agents](docs/reference/built-in-agents.md)** — the cross-cutting agents shipped in this package itself (`AltTextGenerationAgent`, `ContentRewriteAgent`, `SummarizationAgent`) — inputs, output schemas, and consumer notes.
 - **[Bring your own key (BYOK)](docs/guide/byok.md)** — env-mode vs. CMS-mode setup, provider-specific notes for Anthropic, OpenAI, Gemini, Groq, and Ollama.
 - **[Overriding](docs/guide/overriding.md)** — container binding and config override patterns for replacing a shipped agent with your own subclass.
+- **[Trigger surfaces](docs/guide/trigger-surfaces.md)** — the shared exception ladder and Livewire concerns for controllers and components that run agents.
+- **[Testing](docs/guide/testing.md)** — `Ai::fake()` and `FakeAgentPrompter` test doubles.
 - **[React and Vue integration](docs/integration/react-vue-integration.md)** — authentication, base URLs, and streaming for JavaScript clients.
 - **[JSON API schema](docs/reference/api-schema.json)** — OpenAPI 3.1 schema for the REST endpoints that back the React and Vue admin surfaces.
 
@@ -78,8 +82,9 @@ The package fires hooks from `artisanpack-ui/hooks` at the shared prompter seam,
 | `ap.ai.registerFeatures` | filter | on service-provider boot, so packages can register their feature agents | `(FeatureRegistry $registry)` |
 | `ap.ai.promptGenerated` | filter | inside `LaravelAiAgentPrompter::prompt()` before the provider call | `(string $prompt, array $context)` |
 | `ap.ai.responseReceived` | action | inside `LaravelAiAgentPrompter::prompt()` after the provider returns, before JSON decoding | `(string $response, array $context)` |
+| `ap.ai.registerTools` | filter | inside `LaravelAiAgentPrompter::prompt()` once per prompt, after the calling agent's own `withTools()` list is seeded | `(array $tools, array $context)` |
 
-`$context` for the prompt/response hooks carries `provider`, `model`, `instructions`, and `attachments` (count).
+`$context` for the prompt/response/tools hooks carries `provider`, `model`, `instructions`, and `attachments` (count).
 
 ```php
 addFilter( 'ap.ai.promptGenerated', function ( string $prompt, array $context ): string {

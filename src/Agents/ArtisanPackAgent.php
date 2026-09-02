@@ -13,13 +13,18 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ai\Agents;
 
+use ArtisanPackUI\Ai\Ai;
 use ArtisanPackUI\Ai\Contracts\CredentialResolver;
 use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
 use ArtisanPackUI\Ai\Credentials\Credentials;
 use ArtisanPackUI\Ai\Events\AgentUsageRecorded;
+use ArtisanPackUI\Ai\Exceptions\BudgetExceededException;
 use ArtisanPackUI\Ai\Exceptions\FeatureDisabledException;
 use ArtisanPackUI\Ai\Exceptions\MissingCredentialsException;
+use ArtisanPackUI\Ai\Repositories\AiUsageRepository;
+use ArtisanPackUI\Ai\Support\BudgetSettings;
 use ArtisanPackUI\Ai\Support\FeatureSettings;
+use ArtisanPackUI\Ai\Testing\AiFake;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
@@ -34,17 +39,19 @@ use Stringable;
  * The public surface below is **frozen for v1.x** and must not change
  * without a major version bump:
  *
- *   - Public properties: `$featureKey`, `$package`, `$defaultModel`
+ *   - Public properties: `$featureKey`, `$package`, `$defaultModel`,
+ *     `$critical` (added 1.2.0)
  *   - Abstract methods: `instructions()`, `outputSchema()`
  *   - Static factory: `self::for( $input )`
  *   - Public entry point: `run(): array`
- *   - Fluent overrides: `withCredentials()`, `withModel()`, `withStreaming()`
+ *   - Fluent overrides: `withCredentials()`, `withModel()`, `withStreaming()`,
+ *     `withTools()` (added 1.2.0)
  *   - Cache-key hook: `cacheFingerprint()`
  *
  * Subclasses implement `instructions()` and `outputSchema()` and, if the
  * default `execute()` isn't sufficient, override `execute()` to talk to
  * `laravel/ai` directly. Downstream agents that want provider failover,
- * broadcast/queue dispatch, and `Ai::fake()` should also `use \Laravel\Ai\Promptable;`
+ * broadcast/queue dispatch, and laravel/ai's `\Laravel\Ai\Ai::fake()` should also `use \Laravel\Ai\Promptable;`
  * and call `$this->prompt(...)` / `$this->stream(...)` from their `execute()`.
  * The fluent toggle is named `withStreaming()` (not `stream()`) so it never
  * collides with the trait method.
@@ -98,6 +105,23 @@ abstract class ArtisanPackAgent
     public bool $cacheable = true;
 
     /**
+     * Whether this agent is safety-critical and may bypass the hard budget
+     * cap.
+     *
+     * When `artisanpack.ai.budget.enforce_hard_cap` is enabled and month-to-
+     * date spend has reached the configured monthly cap, non-critical agents
+     * are stopped with a {@see BudgetExceededException}. Subclasses that must
+     * keep running past the cap — spam detection, moderation, and other
+     * safety agents — set this to `true`; those runs are allowed through and
+     * log a warning line instead of throwing.
+     *
+     * @since 1.2.0
+     *
+     * @var bool
+     */
+    public bool $critical = false;
+
+    /**
      * Per-agent cache TTL override in seconds.
      *
      * Zero (the default) means: defer to `artisanpack.ai.cache.ttl`.
@@ -147,6 +171,20 @@ abstract class ArtisanPackAgent
      * @var string|null
      */
     protected ?string $modelOverride = null;
+
+    /**
+     * laravel/ai tool classes/instances to expose to the model for the next
+     * run.
+     *
+     * Populated via {@see withTools()} and forwarded through the prompter so
+     * host-app-registered tools (e.g. Keystone's read-tool registry) flow
+     * through the agent pipeline. Reset per run in {@see for()}.
+     *
+     * @since 1.2.0
+     *
+     * @var array<int, mixed>
+     */
+    protected array $tools = [];
 
     /**
      * Whether the run should stream chunks instead of returning a full
@@ -203,7 +241,7 @@ abstract class ArtisanPackAgent
         $agent = app( static::class );
 
         // Reset every run-scoped field so a container-singleton binding
-        // (documented in docs/overriding-agents.md) or an Octane-cached
+        // (documented in docs/guide/overriding.md) or an Octane-cached
         // instance can't leak run N-1's callback, credentials, or model
         // override into run N.
         $agent->input              = $input;
@@ -211,6 +249,7 @@ abstract class ArtisanPackAgent
         $agent->streamCallback     = null;
         $agent->credentialOverride = null;
         $agent->modelOverride      = null;
+        $agent->tools              = [];
 
         return $agent;
     }
@@ -245,6 +284,43 @@ abstract class ArtisanPackAgent
         $this->modelOverride = $model;
 
         return $this;
+    }
+
+    /**
+     * Set the laravel/ai tools exposed to the model for the next run.
+     *
+     * Replaces any previously set tools (call once with the full list). The
+     * tools are forwarded through the prompter into the underlying agent so
+     * host-app-registered tool classes flow through the pipeline. Subclasses
+     * that override `execute()` should pass `$this->tools()` into their
+     * prompter call — the shipped agents already do.
+     *
+     * @since 1.2.0
+     *
+     * @param  array<int, mixed>  $tools  laravel/ai tool classes/instances.
+     *
+     * @return static
+     */
+    public function withTools( array $tools ): static
+    {
+        $this->tools = array_values( $tools );
+
+        return $this;
+    }
+
+    /**
+     * Return the tools registered for the next run.
+     *
+     * Exposed so `execute()` overrides (and transport wrappers) can forward
+     * the resolved tool list into the prompter.
+     *
+     * @since 1.2.0
+     *
+     * @return array<int, mixed>
+     */
+    public function tools(): array
+    {
+        return $this->tools;
     }
 
     /**
@@ -315,14 +391,19 @@ abstract class ArtisanPackAgent
     /**
      * Execute the agent and return validated output.
      *
+     * When a test-double is installed via {@see Ai::fake()}
+     * the whole pipeline is skipped: the run is recorded and a queued
+     * deterministic response is returned (see {@see AiFake::handle()}).
+     *
      * The default pipeline is:
      *
      *   1. Reject if the feature is disabled.
      *   2. Resolve credentials, rejecting when none are configured.
      *   3. Resolve model (runtime → per-feature config → `$defaultModel`).
      *   4. Serve from cache if `cache.enabled` and a hit exists.
-     *   5. Delegate to `execute()` and validate the shape.
-     *   6. Dispatch `AgentUsageRecorded` with token telemetry.
+     *   5. Enforce the monthly hard budget cap (unless `$critical`).
+     *   6. Delegate to `execute()` and validate the shape.
+     *   7. Dispatch `AgentUsageRecorded` with token telemetry.
      *
      * @since 1.0.0
      *
@@ -332,6 +413,15 @@ abstract class ArtisanPackAgent
     {
         /** @var Container $container */
         $container = app();
+
+        // When a test-double is installed via `Ai::fake()`, hand the run to
+        // it: the fake records the invocation and returns a deterministic
+        // response instead of resolving credentials or calling a provider.
+        $fake = $this->activeFake( $container );
+
+        if ( $fake instanceof AiFake ) {
+            return $fake->handle( $this, $this->input );
+        }
 
         /** @var FeatureRegistry $registry */
         $registry = $container->make( FeatureRegistry::class );
@@ -372,6 +462,8 @@ abstract class ArtisanPackAgent
                 return $cached;
             }
         }
+
+        $this->guardBudget( $container );
 
         $result = $this->execute( $credentials, $model, $instructions );
 
@@ -439,6 +531,29 @@ abstract class ArtisanPackAgent
     }
 
     /**
+     * Resolve the active `Ai::fake()` test-double, if one is installed.
+     *
+     * Returns null in production and in tests that don't fake, so the real
+     * pipeline runs unchanged.
+     *
+     * @since 1.2.0
+     *
+     * @param  Container  $container  Service container.
+     *
+     * @return AiFake|null
+     */
+    protected function activeFake( Container $container ): ?AiFake
+    {
+        if ( ! $container->bound( 'artisanpack.ai' ) ) {
+            return null;
+        }
+
+        $ai = $container->make( 'artisanpack.ai' );
+
+        return $ai instanceof Ai ? $ai->getFake() : null;
+    }
+
+    /**
      * Emit a chunk through the registered stream callback, if any.
      *
      * Subclasses implementing streaming inside `execute()` should call this
@@ -493,6 +608,65 @@ abstract class ArtisanPackAgent
         throw new LogicException(
             sprintf( 'Agent %s must override execute() to talk to laravel/ai.', static::class ),
         );
+    }
+
+    /**
+     * Enforce the monthly hard budget cap before a paid provider call.
+     *
+     * No-op unless `artisanpack.ai.budget.enforce_hard_cap` is enabled and a
+     * positive monthly cap is configured. When month-to-date spend has
+     * reached the cap, non-critical agents are stopped with a
+     * {@see BudgetExceededException}; agents flagged `$critical = true` are
+     * allowed through and log a warning line so safety-critical work keeps
+     * running past the cap.
+     *
+     * Called from `run()` only after a cache miss — cache hits cost nothing
+     * and are served before this guard runs.
+     *
+     * @since 1.2.0
+     *
+     * @param  Container  $container  Service container.
+     *
+     * @throws BudgetExceededException When over cap and the agent is not critical.
+     *
+     * @return void
+     */
+    protected function guardBudget( Container $container ): void
+    {
+        /** @var ConfigRepository $config */
+        $config = $container->make( ConfigRepository::class );
+
+        if ( ! (bool) $config->get( 'artisanpack.ai.budget.enforce_hard_cap', false ) ) {
+            return;
+        }
+
+        $cap = $container->make( BudgetSettings::class )->monthlyCap();
+
+        if ( null === $cap || $cap <= 0.0 ) {
+            return;
+        }
+
+        $spent = $container->make( AiUsageRepository::class )->monthToDateCost();
+
+        if ( $spent < $cap ) {
+            return;
+        }
+
+        if ( $this->critical ) {
+            $container->make( 'log' )->warning(
+                'AI budget cap exceeded; critical agent bypassing hard cap.',
+                [
+                    'feature_key' => $this->featureKey,
+                    'package'     => $this->package,
+                    'spent_usd'   => $spent,
+                    'cap_usd'     => $cap,
+                ],
+            );
+
+            return;
+        }
+
+        throw BudgetExceededException::forFeature( $this->featureKey, $spent, $cap );
     }
 
     /**

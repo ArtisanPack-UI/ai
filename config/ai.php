@@ -90,11 +90,19 @@ return [
     | Recipients receive the `BudgetWarningMail` at most once per calendar
     | month.
     |
+    | When `enforce_hard_cap` is enabled, agents are additionally blocked
+    | from making paid provider calls once month-to-date spend reaches the
+    | cap — a `BudgetExceededException` is thrown before `execute()`. Agents
+    | that set `$critical = true` bypass the hard cap and log a warning line
+    | instead, so safety-critical work (spam detection, moderation) keeps
+    | running. Cache hits cost nothing and are always served. Off by default.
+    |
     */
 
     'budget' => [
         'warning_percentage' => (float) env( 'ARTISANPACK_AI_BUDGET_WARNING_PERCENTAGE', 80 ),
         'monthly_usd'        => env( 'ARTISANPACK_AI_BUDGET_MONTHLY_USD' ),
+        'enforce_hard_cap'   => (bool) env( 'ARTISANPACK_AI_BUDGET_ENFORCE_HARD_CAP', false ),
         'recipients'         => array_values( array_filter( array_map(
             'trim',
             explode( ',', (string) env( 'ARTISANPACK_AI_BUDGET_RECIPIENTS', '' ) ),
@@ -107,21 +115,23 @@ return [
     |--------------------------------------------------------------------------
     |
     | Rate table used by `CostEstimator` to attach `estimated_cost_usd` to
-    | each usage row. Overridable via the published config. Unknown
-    | provider/model combinations resolve to $0 — safe fallback, but you
-    | won't see cost data for them until you add an entry.
+    | each usage row. Overridable via the published config. A model with no
+    | entry falls back to its provider's highest known rate (and logs a
+    | warning) so retired or mistyped ids never silently estimate $0 and
+    | under-count spend. A provider with no priced entries — or all-$0 ones,
+    | like local Ollama models — still resolves to $0 without a warning.
     |
     */
 
     'pricing' => [
 
         'anthropic' => [
-            'claude-3-5-haiku'  => [ 'input_per_1k' => 0.0008, 'output_per_1k' => 0.004 ],
-            'claude-3-5-sonnet' => [ 'input_per_1k' => 0.003,  'output_per_1k' => 0.015 ],
-            'claude-3-opus'     => [ 'input_per_1k' => 0.015,  'output_per_1k' => 0.075 ],
-            'haiku'             => [ 'input_per_1k' => 0.0008, 'output_per_1k' => 0.004 ],
-            'sonnet'            => [ 'input_per_1k' => 0.003,  'output_per_1k' => 0.015 ],
-            'opus'              => [ 'input_per_1k' => 0.015,  'output_per_1k' => 0.075 ],
+            'claude-haiku-4-5' => [ 'input_per_1k' => 0.001, 'output_per_1k' => 0.005 ],
+            'claude-sonnet-5'  => [ 'input_per_1k' => 0.002, 'output_per_1k' => 0.010 ],
+            'claude-opus-5'    => [ 'input_per_1k' => 0.005, 'output_per_1k' => 0.025 ],
+            'haiku'            => [ 'input_per_1k' => 0.001, 'output_per_1k' => 0.005 ],
+            'sonnet'           => [ 'input_per_1k' => 0.002, 'output_per_1k' => 0.010 ],
+            'opus'             => [ 'input_per_1k' => 0.005, 'output_per_1k' => 0.025 ],
         ],
 
         'openai' => [

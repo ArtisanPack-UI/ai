@@ -207,7 +207,7 @@ Throws `FeatureError` when the input isn't an array or when `items` is missing.
 
 ## Extending the prompter
 
-Under the hood every agent's `execute()` delegates to an `AgentPrompter` binding. The default implementation is `LaravelAiAgentPrompter`, which wraps `Laravel\Ai\StructuredAnonymousAgent` — you get provider failover, broadcast/queue dispatch, and `Ai::fake()` support out of the box.
+Under the hood every agent's `execute()` delegates to an `AgentPrompter` binding. The default implementation is `LaravelAiAgentPrompter`, which wraps `Laravel\Ai\StructuredAnonymousAgent` — you get provider failover, broadcast/queue dispatch, and laravel/ai's own `\Laravel\Ai\Ai::fake()` support out of the box. (This package's `ArtisanPackUI\Ai\Facades\Ai::fake()` is a separate, agent-level double — see [[testing]].)
 
 If you need to route through a different provider stack entirely (custom HTTP client, offline stub, air-gapped deployment), rebind the contract in your own service provider:
 
@@ -219,3 +219,5 @@ $this->app->singleton(
 ```
 
 Every shipped agent uses this seam, so a single binding replaces the model transport for all of them.
+
+A custom prompter must implement the full `AgentPrompter::prompt()` signature, including the `array $tools = []` parameter added in 1.2.0 — forward it to whatever transport you build so `withTools()` and the `ap.ai.registerTools` filter keep working.

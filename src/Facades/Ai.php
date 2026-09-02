@@ -20,6 +20,10 @@ use Illuminate\Support\Facades\Facade;
 /**
  * Ai Facade.
  *
+ * @method static \ArtisanPackUI\Ai\Testing\AiFake fake( array $responses = [] )
+ * @method static bool isFaking()
+ * @method static \ArtisanPackUI\Ai\Testing\AiFake|null getFake()
+ *
  * @see \ArtisanPackUI\Ai\Ai
  *
  * @package    ArtisanPack_UI

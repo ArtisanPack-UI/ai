@@ -15,7 +15,7 @@ Every agent extends `ArtisanPackUI\Ai\Agents\ArtisanPackAgent`. The five surface
 ```php
 public string $featureKey;     // e.g. 'seo.suggest_meta_description'
 public string $package;        // e.g. 'artisanpack-ui/seo'
-public string $defaultModel;   // e.g. 'claude-3-5-haiku-latest'
+public string $defaultModel;   // e.g. 'claude-haiku-4-5'
 
 public function instructions(): string;
 public function outputSchema(): array;
@@ -37,7 +37,7 @@ class MetaDescriptionAgent extends ArtisanPackAgent
 
     public string $featureKey   = 'seo.suggest_meta_description';
     public string $package      = 'artisanpack-ui/seo';
-    public string $defaultModel = 'claude-3-5-haiku-latest';
+    public string $defaultModel = 'claude-haiku-4-5';
 
     public function instructions(): string
     {
@@ -133,19 +133,22 @@ $post->update( [ 'meta_description' => $suggestion['meta_description'] ] );
 1. Feature gate check (skips + throws `FeatureDisabledException` when the toggle is off)
 2. Credential resolution via the shared `CredentialResolver`
 3. Cache lookup (SHA-256 of `(feature_key, model, input)` → cached JSON)
-4. `execute()` — your `prompt()` call
-5. `recordUsage()` — fires `AgentUsageRecorded` for the usage dashboard + budget accounting
-6. Cache store on success
+4. Hard budget-cap guard — when `artisanpack.ai.budget.enforce_hard_cap` is on and month-to-date spend has reached the monthly cap, throws `BudgetExceededException` before the provider call. Cache hits (step 3) are served regardless; `$critical = true` agents bypass this and log a warning instead. Off by default.
+5. `execute()` — your `prompt()` call
+6. `recordUsage()` — fires `AgentUsageRecorded` for the usage dashboard + budget accounting
+7. Cache store on success
 
-If you need to bypass the pipeline for a specific call — e.g. dry-running the prompt in a test — call `execute()` directly.
+To exercise an agent in a test without a live provider, don't reach for the protected `execute()` — bind `ArtisanPackUI\Ai\Testing\FakeAgentPrompter` over the `AgentPrompter` contract to run the real pipeline against a canned response, or use `Ai::fake()` to skip the pipeline entirely (see [[testing]]). If you genuinely need to invoke the prompt in isolation, expose an intentional public method on your subclass rather than calling `execute()` from outside the class.
 
 ## Step 4: add per-agent tests
 
-Follow the pattern in `tests/Feature/Agents/`. At minimum:
+Follow the pattern in `tests/Feature/Agents/`. Bind `ArtisanPackUI\Ai\Testing\FakeAgentPrompter` over the `AgentPrompter` contract so the real pipeline runs against a canned provider response (see [[testing]]). At minimum:
 
-- One test that seeds credentials, runs the agent, and asserts the output schema shape.
+- One test that seeds credentials, queues a response on the fake prompter, runs the agent, and asserts the output schema shape.
 - One test that turns the feature off and asserts `FeatureDisabledException` is thrown.
 - One test that verifies `AgentUsageRecorded` is dispatched with the expected feature key + model.
+
+Code that *calls* your agent (controllers, Livewire components, jobs) should use `Ai::fake()` instead so it never depends on your agent's internals.
 
 The base class ships with the plumbing to make these easy — see `tests/Support/FakeAgent.php` for a minimal template.
 
@@ -153,11 +156,11 @@ The base class ships with the plumbing to make these easy — see `tests/Support
 
 The base class handles the following automatically. Don't reimplement them in your agent:
 
-- Reading the API key or provider from the store (use `$this->credentials` if you need to inspect the resolved credentials).
-- Deciding whether the feature is enabled (`isEnabled()` runs before `execute()`).
+- Reading the API key or provider from the store (the resolved `Credentials` are passed into `execute()` as its first argument).
+- Deciding whether the feature is enabled (`run()` checks `FeatureRegistry::isToggleOn()` before `execute()` and throws `FeatureDisabledException` when the toggle is off).
 - Emitting the `AgentUsageRecorded` event.
 - Applying per-feature model overrides (`config('artisanpack.ai.features.<key>.model')` and the admin's advanced-tab override both slot in through `resolveModel()`).
-- Enforcing the monthly cost cap (checked before the provider call in `run()`).
+- Enforcing the monthly cost cap (checked before the provider call in `run()`). Flag a safety-critical agent with `public bool $critical = true;` so it keeps running past the cap — the run is allowed through and a warning line is logged instead of throwing `BudgetExceededException`. Only takes effect when `artisanpack.ai.budget.enforce_hard_cap` is enabled.
 
 ## Convention notes
 

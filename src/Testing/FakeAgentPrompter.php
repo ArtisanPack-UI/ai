@@ -6,12 +6,12 @@
  * @package    ArtisanPack_UI
  * @subpackage Ai
  *
- * @since      1.0.0
+ * @since      1.2.0
  */
 
 declare( strict_types=1 );
 
-namespace Tests\Support;
+namespace ArtisanPackUI\Ai\Testing;
 
 use ArtisanPackUI\Ai\Contracts\AgentPrompter;
 use ArtisanPackUI\Ai\Credentials\Credentials;
@@ -20,10 +20,14 @@ use ArtisanPackUI\Ai\Credentials\Credentials;
  * Records every call and returns a canned response. Tests configure the
  * next response with `queue()`.
  *
+ * Shipped from `src/` so downstream packages that pull `artisanpack-ui/ai`
+ * into their `require-dev` can autoload the same fake instead of keeping a
+ * drifting copy under their own `Tests\Support` namespace.
+ *
  * @package    ArtisanPack_UI
  * @subpackage Ai
  *
- * @since      1.0.0
+ * @since      1.2.0
  */
 class FakeAgentPrompter implements AgentPrompter
 {
@@ -44,7 +48,7 @@ class FakeAgentPrompter implements AgentPrompter
     /**
      * Queue a canned response. Missing token counts default to 0.
      *
-     * @since 1.0.0
+     * @since 1.2.0
      *
      * @param  array<string, mixed>  $output         Parsed model output.
      * @param  int                    $inputTokens   Reported input tokens.
@@ -70,6 +74,7 @@ class FakeAgentPrompter implements AgentPrompter
         string $instructions,
         string|array $message,
         array $outputSchema,
+        array $tools = [],
     ): array {
         $this->calls[] = [
             'credentials'   => $credentials,
@@ -77,6 +82,7 @@ class FakeAgentPrompter implements AgentPrompter
             'instructions'  => $instructions,
             'message'       => $message,
             'output_schema' => $outputSchema,
+            'tools'         => $tools,
         ];
 
         if ( [] === $this->queue ) {

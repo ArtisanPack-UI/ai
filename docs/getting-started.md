@@ -63,4 +63,6 @@ That single call runs the full pipeline: feature-gate check → credential resol
 - [[authoring-agents]] — build your own agent inside a downstream package.
 - [[built-in-agents]] — the cross-cutting agents this package ships.
 - [[overriding]] — replace a shipped agent with your own subclass.
+- [[trigger-surfaces]] — wire an agent into a controller or Livewire component.
+- [[testing]] — fake agents in your test suite.
 - [[react-vue-integration]] — consume the JSON API from a JavaScript client.

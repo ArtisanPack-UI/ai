@@ -57,6 +57,7 @@ class LaravelAiAgentPrompter implements AgentPrompter
         string $instructions,
         string|array $message,
         array $outputSchema,
+        array $tools = [],
     ): array {
         [ $prompt, $attachments ] = $this->normalizeMessage( $message );
 
@@ -70,6 +71,8 @@ class LaravelAiAgentPrompter implements AgentPrompter
             'instructions' => $instructions,
             'attachments'  => count( $attachments ),
         ];
+
+        $tools = $this->resolveTools( $tools, $context );
 
         /**
          * Filter the prompt string before it is sent to the model.
@@ -93,12 +96,7 @@ class LaravelAiAgentPrompter implements AgentPrompter
         // touches) through `serialize()`.
         $schemaProperties = $this->buildLaravelJsonSchema( $outputSchema );
 
-        $agent = new StructuredAnonymousAgent(
-            instructions: $instructions,
-            messages: [],
-            tools: [],
-            schema: static fn () => $schemaProperties,
-        );
+        $agent = $this->buildAgent( $instructions, $schemaProperties, $tools );
 
         $providerName = $this->registerRuntimeProvider( $credentials );
 
@@ -136,10 +134,74 @@ class LaravelAiAgentPrompter implements AgentPrompter
         doAction( 'ap.ai.responseReceived', $response->text, $context );
 
         return [
-            'output'        => $this->decodeOutput( $response ),
+            'output'        => $this->decodeOutput( $response, $outputSchema ),
             'input_tokens'  => $response->usage->promptTokens,
             'output_tokens' => $response->usage->completionTokens,
         ];
+    }
+
+    /**
+     * Merge the caller-supplied tools with any tools contributed by the
+     * host app's registry, then hand back the flat list to expose to the
+     * model.
+     *
+     * The filter is the seam host apps (e.g. Keystone's read-tool registry)
+     * hang their tool classes off of so registered tools flow through every
+     * agent without each agent opting in. Tools passed explicitly by the
+     * calling agent are placed first; the filter receives them and may
+     * append, prepend, or replace. A non-array filter return is ignored so a
+     * misbehaving listener can't blow up the whole request.
+     *
+     * @since 1.2.0
+     *
+     * @param  array<int, mixed>     $tools    Caller-supplied tool classes/instances.
+     * @param  array<string, mixed>  $context  Provider, model, instructions, attachment count.
+     *
+     * @return array<int, mixed>
+     */
+    protected function resolveTools( array $tools, array $context ): array
+    {
+        /**
+         * Filter the list of tools exposed to the model for this run.
+         *
+         * The uniform seam for a host-app tool registry — register read
+         * tools here and they flow through every agent's pipeline. Runs
+         * once per prompt, after the calling agent's own tools are seeded.
+         *
+         * @hook  ap.ai.registerTools
+         *
+         * @since 1.2.0
+         *
+         * @param array<int, mixed>    $tools    Tools seeded by the calling agent.
+         * @param array<string, mixed> $context  Provider, model, instructions, attachment count.
+         */
+        $resolved = applyFilters( 'ap.ai.registerTools', $tools, $context );
+
+        return is_array( $resolved ) ? array_values( $resolved ) : $tools;
+    }
+
+    /**
+     * Construct the structured anonymous agent for a run.
+     *
+     * Extracted so the tool/schema wiring is exercised in isolation and a
+     * future refactor can't silently drop registered tools on the floor.
+     *
+     * @since 1.2.0
+     *
+     * @param  string                                          $instructions      Resolved system prompt.
+     * @param  array<string, \Illuminate\JsonSchema\Types\Type>  $schemaProperties  Built schema map.
+     * @param  array<int, mixed>                               $tools             Resolved tool list.
+     *
+     * @return StructuredAnonymousAgent
+     */
+    protected function buildAgent( string $instructions, array $schemaProperties, array $tools ): StructuredAnonymousAgent
+    {
+        return new StructuredAnonymousAgent(
+            instructions: $instructions,
+            messages: [],
+            tools: $tools,
+            schema: static fn () => $schemaProperties,
+        );
     }
 
     /**
@@ -402,11 +464,13 @@ class LaravelAiAgentPrompter implements AgentPrompter
      *
      * @since 1.0.0
      *
-     * @param  AgentResponse  $response  Provider response.
+     * @param  AgentResponse         $response      Provider response.
+     * @param  array<string, mixed>  $outputSchema  Raw JSON-Schema the run declared, used to
+     *                                               coerce stringified array payloads back into arrays.
      *
      * @return array<string, mixed>
      */
-    protected function decodeOutput( AgentResponse $response ): array
+    protected function decodeOutput( AgentResponse $response, array $outputSchema = [] ): array
     {
         $payload = $this->stripCodeFence( $response->text );
 
@@ -424,7 +488,115 @@ class LaravelAiAgentPrompter implements AgentPrompter
             throw FeatureError::forFeature( '(prompter)', 'model returned a non-object payload' );
         }
 
+        return $this->coerceSchemaArrays( $decoded, $outputSchema );
+    }
+
+    /**
+     * Repair schema-declared array properties that a provider returned as a
+     * JSON-encoded string instead of a real array.
+     *
+     * Anthropic Opus (and potentially other providers under certain nested
+     * JSON-Schema shapes) hands back a required `array` field as a stringified
+     * payload — e.g. `patterns` arrives as `'[{"observation":"..."}]'` or even
+     * `'{"patterns":[{"observation":"..."}]}'`. Downstream agents iterating the
+     * field with `is_array()` silently drop every entry. Coercing once here
+     * keeps every {@see ArtisanPackAgent} subclass free of per-agent
+     * workarounds.
+     *
+     * Only properties the schema declares as `type: array` are touched, and
+     * only when the decoded value is a string — every other value passes
+     * through untouched.
+     *
+     * @since 1.2.0
+     *
+     * @param  array<string, mixed>  $decoded       Decoded top-level payload.
+     * @param  array<string, mixed>  $outputSchema  Raw JSON-Schema the run declared.
+     *
+     * @return array<string, mixed>
+     */
+    protected function coerceSchemaArrays( array $decoded, array $outputSchema ): array
+    {
+        $properties = $outputSchema['properties'] ?? [];
+
+        if ( ! is_array( $properties ) ) {
+            return $decoded;
+        }
+
+        foreach ( $properties as $name => $definition ) {
+            if ( ! is_string( $name ) || ! is_array( $definition ) ) {
+                continue;
+            }
+
+            if ( 'array' !== ( $definition['type'] ?? null ) ) {
+                continue;
+            }
+
+            if ( ! array_key_exists( $name, $decoded ) || ! is_string( $decoded[ $name ] ) ) {
+                continue;
+            }
+
+            $unwrapped = $this->unwrapStringifiedArray( $decoded[ $name ], $name );
+
+            if ( null !== $unwrapped ) {
+                $decoded[ $name ] = $unwrapped;
+            }
+        }
+
         return $decoded;
+    }
+
+    /**
+     * Decode a stringified array payload back into an array, handling both
+     * shapes providers emit.
+     *
+     * Two variants are recognised:
+     * - a bare array — `'[...]'` decodes straight to a list;
+     * - an object re-nesting the same key — `'{"patterns":[...]}'` unwraps to
+     *   the inner `patterns` array.
+     *
+     * Anything else — malformed JSON, a scalar, or an object keyed
+     * differently (including `'{}'` and numeric-keyed objects like
+     * `'{"0":"x"}'`, which decode to list-shaped PHP arrays) — returns `null`
+     * so the caller leaves the original value untouched rather than guessing.
+     *
+     * @since 1.2.0
+     *
+     * @param  string  $value  Raw string value pulled from the decoded payload.
+     * @param  string  $key    Property name, used to unwrap a re-nested object.
+     *
+     * @return array<int|string, mixed>|null
+     */
+    protected function unwrapStringifiedArray( string $value, string $key ): ?array
+    {
+        $trimmed = trim( $value );
+
+        if ( '' === $trimmed ) {
+            return null;
+        }
+
+        try {
+            $decoded = json_decode( $trimmed, true, 512, JSON_THROW_ON_ERROR );
+        } catch ( JsonException ) {
+            return null;
+        }
+
+        if ( ! is_array( $decoded ) ) {
+            return null;
+        }
+
+        // Gate the bare-array branch on the literal opening bracket: a JSON
+        // object like `{}` or `{"0":"x"}` also decodes to a PHP array that
+        // satisfies `array_is_list()`, but the contract keeps a differently
+        // shaped object as a string rather than coercing it.
+        if ( str_starts_with( $trimmed, '[' ) && array_is_list( $decoded ) ) {
+            return $decoded;
+        }
+
+        if ( isset( $decoded[ $key ] ) && is_array( $decoded[ $key ] ) ) {
+            return $decoded[ $key ];
+        }
+
+        return null;
     }
 
     /**

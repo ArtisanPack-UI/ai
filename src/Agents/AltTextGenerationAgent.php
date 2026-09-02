@@ -134,6 +134,7 @@ PROMPT;
                 $reference,
             ],
             outputSchema: $this->outputSchema(),
+            tools: $this->tools(),
         );
 
         return [

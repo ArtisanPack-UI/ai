@@ -96,7 +96,7 @@ Every call to `MetaDescriptionAgent::for( $post )` — inside the SEO package's 
 
 - The base class's `execute()` throws a `LogicException` by default. Subclasses that talk to a provider must override it (or `use \Laravel\Ai\Promptable;` and call `$this->prompt(...)`).
 - The `run()` pipeline (feature gate → credential resolution → cache → execute → telemetry) is not part of the frozen contract in the same way. If you need to change it, override `run()` directly — but be aware you may lose usage tracking or budget accounting if you skip `recordUsage()`.
-- Runtime tweaks that only apply for a single call don't need a binding. Use `withCredentials()`, `withModel()`, `withStreaming()`, or `streamTo()` on the agent instance.
+- Runtime tweaks that only apply for a single call don't need a binding. Use `withCredentials()`, `withModel()`, `withStreaming()`, `withTools()`, or `streamTo()` on the agent instance.
 - Container bindings compose with the `ap.ai.registerFeatures` hook — if you want the registry to point at your subclass too, register `[ 'agent' => OpusMetaDescriptionAgent::class ]` there or in a `aiFeatures()` provider method.
 
 ## Cross-cutting hooks: `ap.ai.promptGenerated` and `ap.ai.responseReceived`
@@ -109,8 +109,6 @@ Some concerns — safety prompts, PII scrubbing, audit logging, telemetry — ap
 The `$context` array carries `provider`, `model`, `instructions`, and attachment count so listeners can key their behaviour on which agent is running.
 
 ```php
-use function ArtisanPackUI\Hooks\{addFilter, addAction};
-
 addFilter( 'ap.ai.promptGenerated', function ( string $prompt, array $context ) {
     return "Do not reveal internal identifiers.\n\n" . $prompt;
 } );
@@ -121,3 +119,67 @@ addAction( 'ap.ai.responseReceived', function ( string $response, array $context
 ```
 
 Because the hooks fire inside the shared prompter, listeners cover every agent — first-party, downstream package, and app subclass — without touching individual call sites.
+
+## Tools, conversations, and human approval
+
+The wrapper is built on `laravel/ai`, which owns three capabilities host apps build assistants on top of: **tool calling**, **conversation persistence**, and **human-in-the-loop tool approval**. `artisanpack-ui/ai` pins `laravel/ai ^0.11.0`, so all three are available to downstream agents.
+
+### Tool passthrough
+
+Register tools for a run with `withTools()` and they flow through the prompter into the underlying agent:
+
+```php
+$result = MyAgent::for( $input )
+    ->withTools( [ ReadPostTool::class, ReadPageTool::class ] )
+    ->run();
+```
+
+The tools are laravel/ai tool classes/instances — see the [laravel/ai tools docs](https://laravel.com/docs/ai). Tools reset per run, so a container-singleton agent binding never leaks one run's tools into the next.
+
+To register tools that apply to **every** agent — a host-app read-tool registry, for example — hang them off the `ap.ai.registerTools` filter instead of calling `withTools()` on each agent:
+
+```php
+addFilter( 'ap.ai.registerTools', function ( array $tools, array $context ) {
+    $tools[] = ReadPostTool::class;
+
+    return $tools;
+} );
+```
+
+The filter runs once per prompt, after the calling agent's own tools are seeded, and receives the same `$context` (provider, model, instructions, attachment count) as the other prompter hooks.
+
+### Conversations and approval
+
+Conversation persistence (`RemembersConversations` / `HasConversations` / `continue()`) and human tool approval (`Approvable`, `Decisions`, the `tool_approval_request` streaming event) are laravel/ai features an agent opts into with laravel/ai's own traits and contracts. The wrapper's default structured path does not enable them — override `execute()` (or `use \Laravel\Ai\Promptable;` and drive the agent directly) when a feature needs stored conversations or an approval gate. See the [laravel/ai documentation](https://laravel.com/docs/ai) for the trait and contract details.
+
+### Embeddings and vector stores for RAG
+
+Retrieval-augmented generation over your own content — embed documents, store the vectors, then retrieve the relevant ones at prompt time — is built entirely on laravel/ai's own embeddings and vector-store surface, all shipped in the pinned `^0.11.0`. The wrapper adds no bespoke embeddings API on top; there is nothing extra to route through, so use laravel/ai directly for indexing and storage:
+
+```php
+use Laravel\Ai\Embeddings;
+use Laravel\Ai\Files\Document;
+use Laravel\Ai\Stores;
+
+// Embed content for indexing.
+$response = Embeddings::for( [ $page->body ] )->generate();
+
+// Or manage a provider-backed vector store.
+$store    = Stores::create( name: 'site-content' );
+$document = Document::fromPath( storage_path( "app/site-content/{$page->slug}.txt" ) );
+$store->add( $document );
+```
+
+Retrieval flows back into an agent as an ordinary tool: laravel/ai's `SimilaritySearch` is a plain laravel/ai tool, so it rides the same [tool passthrough](#tool-passthrough) seam as any other — no separate wiring:
+
+```php
+use Laravel\Ai\Tools\SimilaritySearch;
+
+$result = MyAgent::for( $question )
+    ->withTools( [
+        SimilaritySearch::usingModel( SiteContent::class, 'embedding' ),
+    ] )
+    ->run();
+```
+
+The model exposes `withTools()` — or hang the retrieval tool off the `ap.ai.registerTools` filter to give every agent RAG retrieval at once. See the [laravel/ai documentation](https://laravel.com/docs/ai) for embeddings options, store providers, and the `whereVectorSimilarTo()` model scope `SimilaritySearch` queries against.
