@@ -381,6 +381,30 @@ it( 'leaves a stringified value untouched when it matches neither coercion shape
     expect( $output['patterns'] )->toBe( '{"other":[1,2]}' );
 } );
 
+it( 'leaves an empty JSON object string untouched rather than coercing it to an array', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    // `json_decode( '{}', true )` yields a list-shaped PHP array, but `{}` is a
+    // JSON object, not a bare array — it must survive as the original string.
+    $response = fake_agent_response( '{"patterns":"{}"}' );
+
+    $output = invoke_prompter( $prompter, 'decodeOutput', $response, patterns_output_schema() );
+
+    expect( $output['patterns'] )->toBe( '{}' );
+} );
+
+it( 'leaves a numeric-keyed JSON object string untouched even though it decodes list-shaped', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    // `{"0":"value"}` decodes to `['value']`, which satisfies array_is_list(),
+    // but it is a JSON object and must not be coerced.
+    $response = fake_agent_response( '{"patterns":"{\"0\":\"value\"}"}' );
+
+    $output = invoke_prompter( $prompter, 'decodeOutput', $response, patterns_output_schema() );
+
+    expect( $output['patterns'] )->toBe( '{"0":"value"}' );
+} );
+
 it( 'leaves a stringified array field untouched when no schema is supplied', function (): void {
     $prompter = new LaravelAiAgentPrompter();
 

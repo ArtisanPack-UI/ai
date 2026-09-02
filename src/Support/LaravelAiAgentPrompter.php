@@ -555,8 +555,9 @@ class LaravelAiAgentPrompter implements AgentPrompter
      *   the inner `patterns` array.
      *
      * Anything else — malformed JSON, a scalar, or an object keyed
-     * differently — returns `null` so the caller leaves the original value
-     * untouched rather than guessing.
+     * differently (including `'{}'` and numeric-keyed objects like
+     * `'{"0":"x"}'`, which decode to list-shaped PHP arrays) — returns `null`
+     * so the caller leaves the original value untouched rather than guessing.
      *
      * @since 1.2.0
      *
@@ -583,7 +584,11 @@ class LaravelAiAgentPrompter implements AgentPrompter
             return null;
         }
 
-        if ( array_is_list( $decoded ) ) {
+        // Gate the bare-array branch on the literal opening bracket: a JSON
+        // object like `{}` or `{"0":"x"}` also decodes to a PHP array that
+        // satisfies `array_is_list()`, but the contract keeps a differently
+        // shaped object as a string rather than coercing it.
+        if ( str_starts_with( $trimmed, '[' ) && array_is_list( $decoded ) ) {
             return $decoded;
         }
 
