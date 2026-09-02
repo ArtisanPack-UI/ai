@@ -3,6 +3,7 @@
 declare( strict_types=1 );
 
 use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
+use ArtisanPackUI\Ai\Exceptions\BudgetExceededException;
 use ArtisanPackUI\Ai\Exceptions\FeatureDisabledException;
 use ArtisanPackUI\Ai\Exceptions\FeatureError;
 use ArtisanPackUI\Ai\Exceptions\MissingCredentialsException;
@@ -72,6 +73,27 @@ it( 'maps each handled AI exception onto the normalized tuple, passing its messa
         'AI feature "ai.alt_text" could not run: unreadable image',
     ],
 ] );
+
+it( 'maps a budget-exceeded stop onto a clean 429 without leaking the spend or logging an error', function (): void {
+    $log = Log::spy();
+
+    $outcome = ( new HandlesAiFeatureResponsesHost() )->run(
+        'ai.alt_text',
+        fn () => throw BudgetExceededException::forFeature( 'ai.alt_text', 120.0, 100.0 ),
+    );
+
+    expect( $outcome->succeeded )->toBeFalse()
+        ->and( $outcome->feature )->toBe( 'ai.alt_text' )
+        ->and( $outcome->output )->toBeNull()
+        ->and( $outcome->status )->toBe( 429 )
+        ->and( $outcome->errorCode )->toBe( 'budget_exceeded' )
+        ->and( $outcome->statusSlug )->toBe( 'budget-exceeded' )
+        ->and( $outcome->message )->toBe( 'The AI monthly budget has been reached. Please try again later.' )
+        ->and( $outcome->message )->not->toContain( '120' )
+        ->and( $outcome->message )->not->toContain( '100' );
+
+    $log->shouldNotHaveReceived( 'error' );
+} );
 
 it( 'maps any other throwable onto a generic internal error without leaking its message', function (): void {
     Log::spy();

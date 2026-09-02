@@ -13,6 +13,7 @@ declare( strict_types=1 );
 
 namespace Tests\Support;
 
+use ArtisanPackUI\Ai\Exceptions\BudgetExceededException;
 use ArtisanPackUI\Ai\Exceptions\FeatureDisabledException;
 use ArtisanPackUI\Ai\Exceptions\FeatureError;
 use ArtisanPackUI\Ai\Exceptions\MissingCredentialsException;
@@ -64,7 +65,7 @@ class InteractsWithAiFeatureComponent extends Component
      *
      * @since 1.2.0
      *
-     * @param  string  $type  One of disabled|credentials|feature|generic.
+     * @param  string  $type  One of disabled|credentials|feature|budget|generic.
      *
      * @return void
      */
@@ -75,6 +76,7 @@ class InteractsWithAiFeatureComponent extends Component
                 'disabled'    => FeatureDisabledException::forFeature( 'fake.echo' ),
                 'credentials' => MissingCredentialsException::forFeature( 'fake.echo' ),
                 'feature'     => new FeatureError( 'A domain-specific failure reason.' ),
+                'budget'      => BudgetExceededException::forFeature( 'fake.echo', 120.0, 100.0 ),
                 default       => new RuntimeException( 'unexpected explosion' ),
             };
         } );
