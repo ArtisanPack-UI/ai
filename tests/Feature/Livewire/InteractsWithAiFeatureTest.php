@@ -41,6 +41,13 @@ it( 'passes a FeatureError message straight through', function (): void {
         ->assertSet( 'isLoading', false );
 } );
 
+it( 'maps a budget-exceeded stop onto a budget-specific error without leaking the spend', function (): void {
+    Livewire::test( InteractsWithAiFeatureComponent::class )
+        ->call( 'fail', 'budget' )
+        ->assertSet( 'error', 'The AI monthly budget has been reached. Please try again later.' )
+        ->assertSet( 'isLoading', false );
+} );
+
 it( 'maps any other throwable onto a generic error', function (): void {
     Livewire::test( InteractsWithAiFeatureComponent::class )
         ->call( 'fail', 'generic' )

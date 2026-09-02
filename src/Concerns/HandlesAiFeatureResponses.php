@@ -14,6 +14,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ai\Concerns;
 
 use ArtisanPackUI\Ai\Contracts\FeatureRegistry;
+use ArtisanPackUI\Ai\Exceptions\BudgetExceededException;
 use ArtisanPackUI\Ai\Exceptions\FeatureDisabledException;
 use ArtisanPackUI\Ai\Exceptions\FeatureError;
 use ArtisanPackUI\Ai\Exceptions\MissingCredentialsException;
@@ -71,7 +72,7 @@ trait HandlesAiFeatureResponses
     /**
      * Run an agent callable and normalize its result into an outcome.
      *
-     * Maps the four AI exception layers onto the shared
+     * Maps the five AI exception layers onto the shared
      * `(status, errorCode, statusSlug, message)` tuple; any other throwable
      * is logged (via {@see aiFeatureLogMessage()}) and reported as a generic
      * `internal_error` so a raw exception message never reaches the client.
@@ -97,6 +98,14 @@ trait HandlesAiFeatureResponses
             return AiFeatureOutcome::failed( $featureKey, 503, 'missing_credentials', 'missing-credentials', $e->getMessage() );
         } catch ( FeatureError $e ) {
             return AiFeatureOutcome::failed( $featureKey, 422, 'invalid_input', 'invalid-input', $e->getMessage() );
+        } catch ( BudgetExceededException $e ) {
+            return AiFeatureOutcome::failed(
+                $featureKey,
+                429,
+                'budget_exceeded',
+                'budget-exceeded',
+                (string) __( 'The AI monthly budget has been reached. Please try again later.' ),
+            );
         } catch ( Throwable $e ) {
             Log::error( $this->aiFeatureLogMessage(), [
                 'feature' => $featureKey,

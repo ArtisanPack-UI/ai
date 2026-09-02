@@ -13,6 +13,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ai\Livewire\Concerns;
 
+use ArtisanPackUI\Ai\Exceptions\BudgetExceededException;
 use ArtisanPackUI\Ai\Exceptions\FeatureDisabledException;
 use ArtisanPackUI\Ai\Exceptions\FeatureError;
 use ArtisanPackUI\Ai\Exceptions\MissingCredentialsException;
@@ -24,7 +25,7 @@ use Throwable;
  *
  * Components hand the agent call to {@see runAiFeature()} as a closure. The
  * concern flips `$this->isLoading` on for the duration, resets
- * `$this->error`, and maps the four AI exception layers onto a user-facing
+ * `$this->error`, and maps the five AI exception layers onto a user-facing
  * `$this->error` string:
  *
  * ```php
@@ -101,6 +102,8 @@ trait InteractsWithAiFeature
             $this->error = (string) __( 'AI credentials are not configured.' );
         } catch ( FeatureError $exception ) {
             $this->error = $exception->getMessage();
+        } catch ( BudgetExceededException $exception ) {
+            $this->error = (string) __( 'The AI monthly budget has been reached. Please try again later.' );
         } catch ( Throwable $exception ) {
             $this->error = (string) __( 'The AI agent could not complete this request.' );
         } finally {

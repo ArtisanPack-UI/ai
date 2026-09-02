@@ -17,7 +17,7 @@ namespace ArtisanPackUI\Ai\Support;
  * Immutable, transport-agnostic result of one AI agent invocation.
  *
  * {@see \ArtisanPackUI\Ai\Concerns\HandlesAiFeatureResponses::handleAiFeature()}
- * runs an agent callable and folds every result — success or any of the four
+ * runs an agent callable and folds every result — success or any of the five
  * failure layers — into one of these. It carries the normalized
  * `(status, errorCode, message)` tuple the issue calls for, plus the
  * feature key and, on success, the agent output.
@@ -44,7 +44,7 @@ final class AiFeatureOutcome
      *
      * @param  bool         $succeeded   Whether the agent call completed without throwing.
      * @param  string       $feature     Feature key the call ran under.
-     * @param  string       $statusSlug  Transport status token (`success`, `disabled`, `missing-credentials`, `invalid-input`, `error`).
+     * @param  string       $statusSlug  Transport status token (`success`, `disabled`, `missing-credentials`, `invalid-input`, `budget-exceeded`, `error`).
      * @param  int          $status      HTTP status code (200 on success).
      * @param  string|null  $errorCode   Machine error code, or null on success.
      * @param  string|null  $message     User-facing error message, or null on success.
@@ -90,7 +90,7 @@ final class AiFeatureOutcome
      * @since 1.2.0
      *
      * @param  string  $feature     Feature key the call ran under.
-     * @param  int     $status      HTTP status code (403, 503, 422, 500).
+     * @param  int     $status      HTTP status code (403, 503, 422, 429, 500).
      * @param  string  $errorCode   Machine error code (e.g. `feature_disabled`).
      * @param  string  $statusSlug  Transport status token (e.g. `disabled`).
      * @param  string  $message     User-facing error message.
