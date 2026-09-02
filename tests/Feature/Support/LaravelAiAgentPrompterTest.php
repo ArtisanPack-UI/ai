@@ -8,6 +8,9 @@ use Illuminate\JsonSchema\Types\Type;
 use Laravel\Ai\Files\Base64Image;
 use Laravel\Ai\Files\LocalImage;
 use Laravel\Ai\Files\RemoteImage;
+use Laravel\Ai\Responses\AgentResponse;
+use Laravel\Ai\Responses\Data\Meta;
+use Laravel\Ai\Responses\Data\Usage;
 use Laravel\Ai\StructuredAnonymousAgent;
 
 /**
@@ -34,6 +37,37 @@ function invoke_prompter( LaravelAiAgentPrompter $prompter, string $method, mixe
     $reflect->setAccessible( true );
 
     return $reflect->invoke( $prompter, ...$args );
+}
+
+/**
+ * Build a minimal {@see AgentResponse} carrying the given raw text so
+ * {@see LaravelAiAgentPrompter::decodeOutput()} can be exercised end-to-end
+ * without the laravel/ai provider machinery.
+ */
+function fake_agent_response( string $text ): AgentResponse
+{
+    return new AgentResponse( 'inv-test', $text, new Usage(), new Meta() );
+}
+
+/**
+ * The output schema the analytics SegmentInsightAgent-style agents declare —
+ * a required `patterns` array of objects. This is the shape that triggers the
+ * Opus stringified-array quirk this coercion exists to repair.
+ *
+ * @return array<string, mixed>
+ */
+function patterns_output_schema(): array
+{
+    return [
+        'type'       => 'object',
+        'required'   => [ 'patterns' ],
+        'properties' => [
+            'patterns' => [
+                'type'  => 'array',
+                'items' => [ 'type' => 'object' ],
+            ],
+        ],
+    ];
 }
 
 it( 'splits a structured message into a text prompt and typed attachments', function (): void {
@@ -274,4 +308,109 @@ it( 'ignores a non-array return from the ap.ai.registerTools filter', function (
     expect( $resolved )->toBe( [ 'App\\Tools\\FromAgent' ] );
 
     removeAllFilters( 'ap.ai.registerTools' );
+} );
+
+it( 'unwraps an Opus-stringified nested-object array payload back into a populated array', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    // The exact shape Opus emits: the whole schema re-nested inside a JSON string.
+    $response = fake_agent_response(
+        '{"patterns":"{\"patterns\":[{\"observation\":\"spike\"},{\"observation\":\"dip\"}]}"}',
+    );
+
+    $output = invoke_prompter( $prompter, 'decodeOutput', $response, patterns_output_schema() );
+
+    expect( $output['patterns'] )->toBeArray();
+    expect( $output['patterns'] )->toHaveCount( 2 );
+    expect( $output['patterns'][0]['observation'] )->toBe( 'spike' );
+} );
+
+it( 'unwraps a stringified bare-array payload back into a populated array', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    $response = fake_agent_response(
+        '{"patterns":"[{\"observation\":\"spike\"},{\"observation\":\"dip\"}]"}',
+    );
+
+    $output = invoke_prompter( $prompter, 'decodeOutput', $response, patterns_output_schema() );
+
+    expect( $output['patterns'] )->toBeArray();
+    expect( $output['patterns'] )->toHaveCount( 2 );
+    expect( $output['patterns'][1]['observation'] )->toBe( 'dip' );
+} );
+
+it( 'leaves a proper array payload untouched (Sonnet path)', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    $response = fake_agent_response(
+        '{"patterns":[{"observation":"spike"}]}',
+    );
+
+    $output = invoke_prompter( $prompter, 'decodeOutput', $response, patterns_output_schema() );
+
+    expect( $output['patterns'] )->toBe( [ [ 'observation' => 'spike' ] ] );
+} );
+
+it( 'does not coerce a string property that happens to hold JSON-looking text', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    $schema = [
+        'type'       => 'object',
+        'properties' => [
+            'summary' => [ 'type' => 'string' ],
+        ],
+    ];
+
+    $response = fake_agent_response( '{"summary":"[1,2,3]"}' );
+
+    $output = invoke_prompter( $prompter, 'decodeOutput', $response, $schema );
+
+    // `summary` is declared a string, so the array-looking value is left alone.
+    expect( $output['summary'] )->toBe( '[1,2,3]' );
+} );
+
+it( 'leaves a stringified value untouched when it matches neither coercion shape', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    // A string that decodes to an object keyed differently — we cannot safely
+    // guess which key holds the list, so the original value survives.
+    $response = fake_agent_response( '{"patterns":"{\"other\":[1,2]}"}' );
+
+    $output = invoke_prompter( $prompter, 'decodeOutput', $response, patterns_output_schema() );
+
+    expect( $output['patterns'] )->toBe( '{"other":[1,2]}' );
+} );
+
+it( 'leaves an empty JSON object string untouched rather than coercing it to an array', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    // `json_decode( '{}', true )` yields a list-shaped PHP array, but `{}` is a
+    // JSON object, not a bare array — it must survive as the original string.
+    $response = fake_agent_response( '{"patterns":"{}"}' );
+
+    $output = invoke_prompter( $prompter, 'decodeOutput', $response, patterns_output_schema() );
+
+    expect( $output['patterns'] )->toBe( '{}' );
+} );
+
+it( 'leaves a numeric-keyed JSON object string untouched even though it decodes list-shaped', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    // `{"0":"value"}` decodes to `['value']`, which satisfies array_is_list(),
+    // but it is a JSON object and must not be coerced.
+    $response = fake_agent_response( '{"patterns":"{\"0\":\"value\"}"}' );
+
+    $output = invoke_prompter( $prompter, 'decodeOutput', $response, patterns_output_schema() );
+
+    expect( $output['patterns'] )->toBe( '{"0":"value"}' );
+} );
+
+it( 'leaves a stringified array field untouched when no schema is supplied', function (): void {
+    $prompter = new LaravelAiAgentPrompter();
+
+    $response = fake_agent_response( '{"patterns":"[1,2,3]"}' );
+
+    $output = invoke_prompter( $prompter, 'decodeOutput', $response );
+
+    expect( $output['patterns'] )->toBe( '[1,2,3]' );
 } );
