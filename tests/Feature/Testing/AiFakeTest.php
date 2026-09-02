@@ -7,9 +7,9 @@ use ArtisanPackUI\Ai\Agents\SummarizationAgent;
 use ArtisanPackUI\Ai\Contracts\AgentPrompter;
 use ArtisanPackUI\Ai\Events\AgentUsageRecorded;
 use ArtisanPackUI\Ai\Facades\Ai;
+use ArtisanPackUI\Ai\Testing\FakeAgentPrompter;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\AssertionFailedError;
-use Tests\Support\FakeAgentPrompter;
 
 it( 'is not faking until Ai::fake() is called', function (): void {
     expect( Ai::isFaking() )->toBeFalse();
