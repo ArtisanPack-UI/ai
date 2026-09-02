@@ -138,7 +138,7 @@ $post->update( [ 'meta_description' => $suggestion['meta_description'] ] );
 6. `recordUsage()` — fires `AgentUsageRecorded` for the usage dashboard + budget accounting
 7. Cache store on success
 
-If you need to bypass the pipeline for a specific call — e.g. dry-running the prompt in a test — call `execute()` directly.
+To exercise an agent in a test without a live provider, don't reach for the protected `execute()` — bind `ArtisanPackUI\Ai\Testing\FakeAgentPrompter` over the `AgentPrompter` contract to run the real pipeline against a canned response, or use `Ai::fake()` to skip the pipeline entirely (see [[testing]]). If you genuinely need to invoke the prompt in isolation, expose an intentional public method on your subclass rather than calling `execute()` from outside the class.
 
 ## Step 4: add per-agent tests
 

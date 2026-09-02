@@ -50,7 +50,8 @@ interface AgentPrompter
      * app (or the calling agent) wants exposed to the model for this run —
      * e.g. Keystone's read-tool registry. Implementations MUST forward them
      * to the underlying agent so registered tools flow through the pipeline;
-     * an empty array (the default) preserves the tool-free behaviour.
+     * an empty array (the default) preserves the tool-free behaviour. The
+     * `$tools` parameter was added in 1.2.0.
      *
      * @since 1.0.0
      *
@@ -59,7 +60,7 @@ interface AgentPrompter
      * @param  string              $instructions  Resolved system prompt.
      * @param  array<int, array<string, mixed>>|string  $message  User message payload.
      * @param  array<string, mixed>  $outputSchema  Structured output schema to enforce.
-     * @param  array<int, mixed>     $tools         laravel/ai tool classes/instances to expose to the model.
+     * @param  array<int, mixed>     $tools         laravel/ai tool classes/instances to expose to the model. Added in 1.2.0.
      *
      * @return array{ output: array<string, mixed>, input_tokens: int, output_tokens: int }
      */

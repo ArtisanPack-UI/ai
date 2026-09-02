@@ -158,13 +158,15 @@ Retrieval-augmented generation over your own content — embed documents, store 
 
 ```php
 use Laravel\Ai\Embeddings;
+use Laravel\Ai\Files\Document;
 use Laravel\Ai\Stores;
 
 // Embed content for indexing.
 $response = Embeddings::for( [ $page->body ] )->generate();
 
 // Or manage a provider-backed vector store.
-$store = Stores::create( name: 'site-content' );
+$store    = Stores::create( name: 'site-content' );
+$document = Document::fromPath( storage_path( "app/site-content/{$page->slug}.txt" ) );
 $store->add( $document );
 ```
 

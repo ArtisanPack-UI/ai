@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 use Tests\Support\HandlesAiFeatureResponsesHost;
 
 it( 'wraps a successful agent call in a success outcome and logs nothing', function (): void {
-    Log::spy();
+    $log = Log::spy();
 
     $outcome = ( new HandlesAiFeatureResponsesHost() )->run(
         'ai.summarize',
@@ -28,7 +28,7 @@ it( 'wraps a successful agent call in a success outcome and logs nothing', funct
         ->and( $outcome->errorCode )->toBeNull()
         ->and( $outcome->message )->toBeNull();
 
-    Log::shouldNotHaveReceived( 'error' );
+    $log->shouldNotHaveReceived( 'error' );
 } );
 
 it( 'maps each handled AI exception onto the normalized tuple, passing its message through', function (
@@ -115,14 +115,14 @@ it( 'maps any other throwable onto a generic internal error without leaking its 
 } );
 
 it( 'logs the raw error under the consumer log label in the fixed context shape', function (): void {
-    Log::spy();
+    $log = Log::spy();
 
     ( new HandlesAiFeatureResponsesHost() )->run(
         'ai.summarize',
         fn () => throw new RuntimeException( 'raw provider stack trace' ),
     );
 
-    Log::shouldHaveReceived( 'error' )
+    $log->shouldHaveReceived( 'error' )
         ->once()
         ->withArgs( function ( string $message, array $context ): bool {
             return HandlesAiFeatureResponsesHost::LOG_MESSAGE === $message
